@@ -1,0 +1,29 @@
+[project]
+name = "malv-beast-worker"
+version = "0.1.0"
+description = "Private/local MALV Beast worker (FastAPI)."
+requires-python = ">=3.9"
+
+[tool.poetry]
+name = "malv-beast-worker"
+version = "0.1.0"
+description = "Private/local MALV Beast worker (FastAPI)."
+authors = ["MALV"]
+readme = "README.md"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<4.0"
+fastapi = "^0.115.0"
+uvicorn = { version = "^0.30.6", extras = ["standard"] }
+python-dotenv = "^1.0.1"
+pydantic = "^2.9.2"
+httpx = "^0.27.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+

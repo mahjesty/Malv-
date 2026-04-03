@@ -1,0 +1,38 @@
+{
+  "name": "malv",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "apps/beast-worker",
+    "apps/supervisor",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:check": "node scripts/dev-doctor.js",
+    "dev:api": "npm run dev -w @malv/api",
+    "dev:beast": "npm run dev -w @malv/beast-worker",
+    "dev:supervisor": "npm run dev -w @malv/supervisor",
+    "dev:raw": "concurrently -n WEB,API,BEAST,SUP -c cyan,magenta,green,yellow \"npm run dev -w @malv/web\" \"npm run dev:api\" \"npm run dev:beast\" \"npm run dev:supervisor\"",
+    "dev:backend": "concurrently -n API,BEAST,SUP -c magenta,green,yellow \"npm run dev:api\" \"npm run dev:beast\" \"npm run dev:supervisor\"",
+    "dev:next": "concurrently -n NEXT,API -c cyan,magenta \"npm run dev --prefix apps/malv-frontend\" \"npm run dev -w @malv/api\"",
+    "dev": "node scripts/dev-doctor.js && npm run dev:raw",
+    "build": "npm run build -w @malv/web && npm run build -w @malv/api && npm run build -w @malv/beast-worker && npm run build -w @malv/supervisor",
+    "typecheck": "npm run typecheck -w @malv/web && npm run typecheck -w @malv/api && npm run typecheck -w @malv/supervisor",
+    "lint": "npm run lint -w @malv/web && npm run lint -w @malv/api && npm run lint -w @malv/supervisor",
+    "format": "prettier --write .",
+    "smoke:launch": "node scripts/launch-smoke-runner.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "prettier": "^3.3.3"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.7.0",
+    "motion": "^12.38.0",
+    "tailwind-merge": "^3.5.0",
+    "wavesurfer.js": "^7.12.5"
+  }
+}

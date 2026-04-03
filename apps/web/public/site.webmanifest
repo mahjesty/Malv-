@@ -1,0 +1,15 @@
+{
+  "name": "MALV",
+  "short_name": "MALV",
+  "icons": [
+    {
+      "src": "/malv-mark.svg?v=3",
+      "sizes": "40x40",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "theme_color": "#0e111b",
+  "background_color": "#f7f9ff",
+  "display": "standalone"
+}

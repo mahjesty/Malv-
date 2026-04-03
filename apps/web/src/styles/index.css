@@ -1,0 +1,554 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  MALV global tokens + base styles.
+  Avoid @apply with arbitrary values that contain var() (e.g. ring-offset-[rgb(var(--x))]) —
+  Tailwind JIT can throw in dev/postcss when expanding those inside @apply.
+*/
+
+/* Design tokens — MALV operator cockpit (default: dark; light when .dark is absent) */
+:root {
+  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-display: "Syne", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Deep charcoal / graphite / black-blue — high separation from text */
+  --malv-canvas-rgb: 6 8 14;
+  --malv-bg-rgb: 9 11 20;
+  --malv-card-rgb: 20 24 40;
+  --malv-text-rgb: 248 250 255;
+  --malv-muted-rgb: 168 176 200;
+  --malv-border-rgb: 255 255 255;
+  --malv-surface-void-rgb: 4 5 11;
+  --malv-surface-base-rgb: 11 13 22;
+  --malv-surface-raised-rgb: 18 21 36;
+  --malv-surface-overlay-rgb: 26 30 48;
+  /* Electric blue / indigo / violet accents */
+  --malv-brand-rgb: 96 165 250;
+  --malv-brand-muted-rgb: 79 70 229;
+  --malv-brand2-rgb: 56 189 248;
+  --malv-accent-cyan-rgb: 34 211 238;
+  --malv-accent-violet-rgb: 167 139 250;
+
+  /* shadcn/v0-style semantic colors — scoped overrides on .landing-v0 / .auth-page / .malv-dashboard-v0 */
+  --v0-background: oklch(0.08 0.01 260);
+  --v0-foreground: oklch(0.98 0 0);
+  --v0-card: oklch(0.12 0.015 260);
+  --v0-card-foreground: oklch(0.98 0 0);
+  --v0-popover: oklch(0.1 0.01 260);
+  --v0-popover-foreground: oklch(0.98 0 0);
+  --v0-primary: oklch(0.7 0.15 200);
+  --v0-primary-foreground: oklch(0.08 0.01 260);
+  --v0-secondary: oklch(0.18 0.02 260);
+  --v0-secondary-foreground: oklch(0.98 0 0);
+  --v0-muted: oklch(0.2 0.015 260);
+  --v0-muted-foreground: oklch(0.65 0 0);
+  --v0-accent: oklch(0.7 0.15 200);
+  --v0-accent-foreground: oklch(0.98 0 0);
+  --v0-destructive: oklch(0.577 0.245 27.325);
+  --v0-destructive-foreground: oklch(0.98 0 0);
+  --v0-border: oklch(0.25 0.02 260);
+  --v0-input: oklch(0.15 0.015 260);
+  --v0-ring: oklch(0.7 0.15 200);
+}
+
+html:not(.dark) {
+  --malv-canvas-rgb: 243 245 250;
+  --malv-bg-rgb: 252 252 255;
+  --malv-card-rgb: 255 255 255;
+  --malv-text-rgb: 12 16 30;
+  --malv-muted-rgb: 72 80 102;
+  --malv-border-rgb: 15 23 42;
+  --malv-surface-void-rgb: 236 239 247;
+  --malv-surface-base-rgb: 252 252 255;
+  --malv-surface-raised-rgb: 255 255 255;
+  --malv-surface-overlay-rgb: 246 248 253;
+  --malv-brand-rgb: 59 130 246;
+  --malv-brand-muted-rgb: 67 56 202;
+  --malv-brand2-rgb: 14 165 233;
+  --malv-accent-cyan-rgb: 8 145 178;
+  --malv-accent-violet-rgb: 109 40 217;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* Use token RGB directly — avoids @apply on custom theme colors (more stable across Tailwind/PostCSS). */
+body {
+  background-color: rgb(var(--malv-canvas-rgb));
+  color: rgb(var(--malv-text-rgb));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01" on, "cv01" on;
+}
+
+::selection {
+  background: rgba(96, 165, 250, 0.35);
+  color: rgb(var(--malv-text-rgb));
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(248, 250, 255, 0.22) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(248, 250, 255, 0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+@layer utilities {
+  /*
+    Focus ring: plain box-shadow matches ring-2 + ring-brand/35 + ring-offset-2 + offset color = bg.
+    Do not use @apply ring-offset-[rgb(var(--malv-bg-rgb))] — breaks Tailwind when var() is inside arbitrary brackets.
+  */
+  .malv-focus-ring {
+    outline: none;
+    box-shadow:
+      0 0 0 2px rgb(var(--malv-bg-rgb)),
+      0 0 0 4px rgb(var(--malv-brand-rgb) / 0.45);
+  }
+}
+
+@layer components {
+  /*
+    Edit textarea must never inherit default/browser or forms-plugin blue glow.
+    Keep feedback on container (.malv-edit-bubble:focus-within), not the field.
+  */
+  .malv-edit-textarea {
+    -webkit-appearance: none;
+    appearance: none;
+    outline: none;
+    box-shadow: none;
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .malv-edit-textarea:focus,
+  .malv-edit-textarea:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: transparent !important;
+  }
+
+  .malv-edit-bubble:focus-within {
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.28),
+      0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* Authenticated MALV app background (scoped to /app/* via `AppLayout`) */
+.malv-app-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #0b0b0f;
+  isolation: isolate; /* allow `z-index: -1` background layer to render predictably */
+}
+
+.malv-app-bg {
+  position: fixed;
+  inset: 0;
+  /* Flat near-black. Avoid noisy gradients/glow for ChatGPT-like dark mode. */
+  background: #0b0b0f;
+  z-index: -1;
+  pointer-events: none;
+  /* no blur: keep UI crisp/minimal */
+}
+
+/* Ensure the authenticated shell's base canvas is cinematic-black. */
+.malv-app-shell .bg-malv-canvas {
+  background-color: #0b0b0f !important;
+}
+
+/* The /app home uses v0 `bg-background`; keep it near-black to match the shell. */
+.malv-app-shell .landing-v0.bg-background {
+  background-color: #0b0b0f !important;
+}
+
+/* Remove blue radial background image in non-immersive mode. */
+.malv-app-shell .bg-malv-radial {
+  background-color: #0b0b0f !important;
+  background-image: none !important;
+}
+
+/* Remove blue glow gradients in immersive chat mode. */
+.malv-app-shell .malv-operator-chat-bg {
+  background: #0b0b0f !important;
+  background-image: none !important;
+}
+
+/* Chat route: subtle monochrome depth (theme-aware, no accent colors). */
+:root {
+  --malv-chat-bg-rgb: 247, 247, 245;
+  --malv-chat-bg: rgb(var(--malv-chat-bg-rgb));
+  --malv-chat-topbar-bg: rgba(247, 247, 245, 0.78);
+  --malv-chat-border: rgba(0, 0, 0, 0.06);
+  --malv-chat-scroll-glow: rgba(0, 0, 0, 0.02);
+  --malv-chat-ambient-a: rgba(0, 0, 0, 0.038);
+  --malv-chat-ambient-b: rgba(0, 0, 0, 0.026);
+  --malv-chat-texture-line: rgba(0, 0, 0, 0.024);
+  --malv-chat-vignette: rgba(0, 0, 0, 0.045);
+  --malv-chat-surface-bg: rgba(255, 255, 255, 0.68);
+  --malv-chat-surface-border: rgba(0, 0, 0, 0.08);
+  --malv-chat-surface-border-strong: rgba(0, 0, 0, 0.13);
+  --malv-chat-surface-highlight: rgba(255, 255, 255, 0.75);
+  --malv-chat-surface-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+  --malv-chat-surface-shadow-hover: 0 10px 30px rgba(0, 0, 0, 0.1);
+  --malv-chat-composer-bg: rgba(255, 255, 255, 0.74);
+  --malv-chat-composer-border: rgba(0, 0, 0, 0.08);
+  --malv-chat-composer-border-strong: rgba(0, 0, 0, 0.13);
+  --malv-chat-composer-shadow: 0 16px 40px rgba(0, 0, 0, 0.09);
+  --malv-chat-composer-shadow-focus: 0 22px 50px rgba(0, 0, 0, 0.13);
+  --malv-chat-action-icon-muted: rgba(0, 0, 0, 0.42);
+  --malv-chat-action-icon-strong: rgba(0, 0, 0, 0.76);
+  --malv-chat-action-icon-shadow: rgba(0, 0, 0, 0.18);
+}
+
+.dark {
+  --malv-chat-bg-rgb: 10, 10, 10;
+  --malv-chat-bg: rgb(var(--malv-chat-bg-rgb));
+  --malv-chat-topbar-bg: rgba(10, 10, 10, 0.78);
+  --malv-chat-border: rgba(255, 255, 255, 0.06);
+  --malv-chat-scroll-glow: rgba(255, 255, 255, 0.02);
+  --malv-chat-ambient-a: rgba(255, 255, 255, 0.036);
+  --malv-chat-ambient-b: rgba(255, 255, 255, 0.026);
+  --malv-chat-texture-line: rgba(255, 255, 255, 0.02);
+  --malv-chat-vignette: rgba(0, 0, 0, 0.22);
+  --malv-chat-surface-bg: rgba(255, 255, 255, 0.032);
+  --malv-chat-surface-border: rgba(255, 255, 255, 0.06);
+  --malv-chat-surface-border-strong: rgba(255, 255, 255, 0.12);
+  --malv-chat-surface-highlight: rgba(255, 255, 255, 0.06);
+  --malv-chat-surface-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --malv-chat-surface-shadow-hover: 0 14px 34px rgba(0, 0, 0, 0.38);
+  --malv-chat-composer-bg: rgba(255, 255, 255, 0.035);
+  --malv-chat-composer-border: rgba(255, 255, 255, 0.08);
+  --malv-chat-composer-border-strong: rgba(255, 255, 255, 0.15);
+  --malv-chat-composer-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+  --malv-chat-composer-shadow-focus: 0 22px 56px rgba(0, 0, 0, 0.5);
+  --malv-chat-action-icon-muted: rgba(255, 255, 255, 0.42);
+  --malv-chat-action-icon-strong: rgba(255, 255, 255, 0.82);
+  --malv-chat-action-icon-shadow: rgba(0, 0, 0, 0.35);
+}
+
+.malv-chat-shell {
+  position: relative;
+  background: var(--malv-chat-bg);
+  isolation: isolate;
+}
+
+.malv-chat-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, var(--malv-chat-surface-highlight), transparent 30%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.malv-chat-topbar {
+  background: var(--malv-chat-topbar-bg);
+  border-bottom: 1px solid var(--malv-chat-border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 1px 0 var(--malv-chat-surface-highlight) inset,
+    0 10px 24px rgba(0, 0, 0, 0.08);
+}
+
+.malv-header {
+  background: var(--malv-chat-topbar-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--malv-chat-border);
+}
+
+.malv-chat-brand-badge {
+  background: var(--malv-chat-surface-bg);
+  border: 1px solid var(--malv-chat-surface-border);
+  box-shadow: var(--malv-chat-surface-shadow), inset 0 1px 0 var(--malv-chat-surface-highlight);
+}
+
+.malv-card {
+  border-radius: 14px;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+}
+
+.malv-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--malv-chat-surface-border-strong);
+  box-shadow: var(--malv-chat-surface-shadow-hover), inset 0 1px 0 var(--malv-chat-surface-highlight);
+}
+
+.malv-chat-header-action {
+  --malv-chat-header-action-size: 36px;
+  width: var(--malv-chat-header-action-size);
+  height: var(--malv-chat-header-action-size);
+  color: var(--malv-chat-action-icon-muted);
+  background: var(--malv-chat-surface-bg);
+  border: 1px solid var(--malv-chat-surface-border);
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 1px 0 var(--malv-chat-surface-highlight) inset,
+    var(--malv-chat-surface-shadow);
+  transform: translateY(0) scale(1);
+  color: var(--malv-chat-action-icon-muted);
+  transition:
+    border-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 180ms ease-out,
+    background-color 180ms ease-out,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease-out;
+  animation: malv-header-action-breathe 7.2s ease-in-out infinite;
+}
+
+.malv-chat-header-actions-group {
+  gap: 0.42rem;
+  align-items: center;
+}
+
+.malv-chat-header-action:hover {
+  animation-play-state: paused;
+  color: var(--malv-chat-action-icon-strong);
+  border-color: var(--malv-chat-surface-border-strong);
+  transform: translateY(-1px) scale(1.03);
+  box-shadow:
+    0 1px 0 var(--malv-chat-surface-highlight) inset,
+    var(--malv-chat-surface-shadow-hover);
+}
+
+.malv-chat-header-action:active {
+  animation-play-state: paused;
+  transform: translateY(0) scale(0.99);
+  box-shadow:
+    0 1px 0 var(--malv-chat-surface-highlight) inset,
+    var(--malv-chat-surface-shadow);
+}
+
+.malv-chat-header-action:focus-visible {
+  animation-play-state: paused;
+  color: var(--malv-chat-action-icon-strong);
+  border-color: var(--malv-chat-surface-border-strong);
+  box-shadow:
+    0 1px 0 var(--malv-chat-surface-highlight) inset,
+    var(--malv-chat-surface-shadow-hover);
+}
+
+.malv-chat-header-action-icon {
+  opacity: 0.84;
+  transform: scale(1);
+  transition: opacity 180ms ease-out, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.malv-chat-header-action-voice .malv-chat-header-action-icon {
+  color: rgba(56, 82, 128, 0.98);
+}
+
+.malv-chat-header-action-video .malv-chat-header-action-icon {
+  color: rgba(88, 72, 138, 0.98);
+}
+
+.malv-chat-header-action-voice:hover .malv-chat-header-action-icon,
+.malv-chat-header-action-voice:focus-visible .malv-chat-header-action-icon {
+  color: rgba(44, 72, 122, 1);
+}
+
+.malv-chat-header-action-video:hover .malv-chat-header-action-icon,
+.malv-chat-header-action-video:focus-visible .malv-chat-header-action-icon {
+  color: rgba(73, 58, 124, 1);
+}
+
+.malv-chat-header-action:hover .malv-chat-header-action-icon,
+.malv-chat-header-action:focus-visible .malv-chat-header-action-icon {
+  opacity: 1;
+  transform: scale(1.03);
+}
+
+.malv-chat-header-action:active .malv-chat-header-action-icon {
+  opacity: 0.94;
+  transform: scale(1.01);
+}
+
+.dark .malv-chat-header-action {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 8px 20px rgba(0, 0, 0, 0.34);
+}
+
+.dark .malv-chat-header-action-voice .malv-chat-header-action-icon {
+  color: rgba(214, 226, 246, 0.98);
+}
+
+.dark .malv-chat-header-action-video .malv-chat-header-action-icon {
+  color: rgba(220, 212, 248, 0.98);
+}
+
+.dark .malv-chat-header-action-voice:hover .malv-chat-header-action-icon,
+.dark .malv-chat-header-action-voice:focus-visible .malv-chat-header-action-icon {
+  color: rgba(228, 238, 255, 1);
+}
+
+.dark .malv-chat-header-action-video:hover .malv-chat-header-action-icon,
+.dark .malv-chat-header-action-video:focus-visible .malv-chat-header-action-icon {
+  color: rgba(236, 228, 255, 1);
+}
+
+.dark .malv-chat-header-action:hover,
+.dark .malv-chat-header-action:focus-visible {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 11px 24px rgba(0, 0, 0, 0.42);
+}
+
+@keyframes malv-header-action-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 1px 0 var(--malv-chat-surface-highlight) inset,
+      var(--malv-chat-surface-shadow);
+  }
+  50% {
+    box-shadow:
+      0 1px 0 var(--malv-chat-surface-highlight) inset,
+      0 9px 26px rgba(0, 0, 0, 0.09);
+  }
+}
+
+.malv-interactive {
+  transition: transform 140ms ease, opacity 140ms ease, box-shadow 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.malv-interactive:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+.malv-chat-suggestion-card {
+  transition:
+    transform 200ms ease-out,
+    box-shadow 200ms ease-out,
+    border-color 200ms ease-out,
+    background-color 200ms ease-out;
+}
+
+.malv-chat-composer-dock {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.malv-input-dock {
+  background: var(--malv-chat-composer-bg);
+  border: 1px solid var(--malv-chat-composer-border);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    var(--malv-chat-composer-shadow),
+    0 0 0 1px var(--malv-chat-surface-highlight) inset;
+  transition: all 160ms ease;
+}
+
+.malv-input-dock:focus-within {
+  border-color: var(--malv-chat-composer-border-strong);
+  box-shadow:
+    var(--malv-chat-composer-shadow-focus),
+    0 0 0 1px var(--malv-chat-surface-highlight) inset;
+}
+
+.malv-chat-composer-shell {
+  transform: translateY(0);
+}
+
+.malv-chat-composer-shell:focus-within {
+  transform: translateY(-1px);
+}
+
+@keyframes malv-ambient-breath {
+  0%,
+  100% {
+    opacity: 0.88;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes malv-texture-drift {
+  0% {
+    background-position:
+      0 0,
+      0 0;
+  }
+  100% {
+    background-position:
+      0 0,
+      30px 0;
+  }
+}
+
+/* Voice call orb shell — subtle ring breathe + reconnecting label pulse */
+@keyframes malv-voice-orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.82;
+  }
+}
+
+@keyframes malv-voice-status-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.38;
+  }
+}
+
+.malv-voice-orb-breathe {
+  animation: malv-voice-orb-breathe 3.2s ease-in-out infinite;
+}
+
+.malv-voice-status-blink {
+  animation: malv-voice-status-blink 1.45s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .malv-voice-orb-breathe,
+  .malv-voice-status-blink {
+    animation: none;
+  }
+
+  .malv-chat-shell,
+  .malv-card,
+  .malv-interactive,
+  .malv-input-dock,
+  .malv-chat-header-action,
+  .malv-chat-header-action-icon {
+    transition: none;
+  }
+
+  .malv-chat-header-action {
+    animation: none;
+  }
+}

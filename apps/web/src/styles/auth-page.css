@@ -1,0 +1,72 @@
+/* Auth neural UI — design tokens from v0 export (maps to Tailwind v0-* theme aliases) */
+.auth-page.landing-v0 {
+  --v0-background: oklch(0.08 0.01 260);
+  --v0-foreground: oklch(0.98 0 0);
+  --v0-card: oklch(0.12 0.015 260);
+  --v0-card-foreground: oklch(0.98 0 0);
+  --v0-popover: oklch(0.1 0.01 260);
+  --v0-popover-foreground: oklch(0.98 0 0);
+  --v0-primary: oklch(0.7 0.2 200);
+  --v0-primary-foreground: oklch(0.08 0.01 260);
+  --v0-secondary: oklch(0.15 0.02 260);
+  --v0-secondary-foreground: oklch(0.9 0 0);
+  --v0-muted: oklch(0.18 0.015 260);
+  --v0-muted-foreground: oklch(0.65 0.01 260);
+  --v0-accent: oklch(0.65 0.25 180);
+  --v0-accent-foreground: oklch(0.08 0.01 260);
+  --v0-destructive: oklch(0.55 0.22 25);
+  --v0-destructive-foreground: oklch(0.98 0 0);
+  --v0-border: oklch(0.25 0.02 260);
+  --v0-input: oklch(0.15 0.015 260);
+  --v0-ring: oklch(0.7 0.2 200);
+  --v0-chart-1: oklch(0.7 0.2 200);
+  --v0-chart-2: oklch(0.65 0.25 180);
+  --v0-chart-3: oklch(0.6 0.2 280);
+  --v0-chart-4: oklch(0.75 0.15 150);
+  --v0-chart-5: oklch(0.8 0.18 90);
+  --v0-sidebar: oklch(0.1 0.01 260);
+  --v0-sidebar-foreground: oklch(0.98 0 0);
+  --v0-sidebar-primary: oklch(0.7 0.2 200);
+  --v0-sidebar-primary-foreground: oklch(0.08 0.01 260);
+  --v0-sidebar-accent: oklch(0.15 0.02 260);
+  --v0-sidebar-accent-foreground: oklch(0.9 0 0);
+  --v0-sidebar-border: oklch(0.25 0.02 260);
+  --v0-sidebar-ring: oklch(0.7 0.2 200);
+}
+
+@keyframes auth-gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes grid-move {
+  0% {
+    transform: translateY(0) translateZ(0);
+  }
+  100% {
+    transform: translateY(50px) translateZ(0);
+  }
+}
+
+.auth-page .animate-auth-gradient {
+  background-size: 200% auto;
+  animation: auth-gradient-shift 8s linear infinite;
+}
+
+.auth-page .animate-grid-move {
+  animation: grid-move 20s linear infinite;
+  will-change: transform;
+}
+
+.auth-page .gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

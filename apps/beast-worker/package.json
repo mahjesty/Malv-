@@ -1,0 +1,12 @@
+{
+  "name": "@malv/beast-worker",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node ../../scripts/run-uvicorn-beast.cjs",
+    "start": "node ../../scripts/run-uvicorn-beast.cjs --production",
+    "typecheck": "echo \"(python typecheck later)\"",
+    "lint": "echo \"(lint later)\""
+  }
+}
+
