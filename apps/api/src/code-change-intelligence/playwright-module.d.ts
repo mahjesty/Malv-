@@ -9,9 +9,14 @@ declare module "playwright" {
   };
   export type Page = {
     emulateMedia: (options: { colorScheme?: string }) => Promise<void>;
+    setContent: (html: string, options?: { waitUntil?: string; timeout?: number }) => Promise<void>;
     goto: (url: string, options?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
     reload: (options?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
-    screenshot: (options?: { type?: string; fullPage?: boolean }) => Promise<Buffer>;
+    screenshot: (options?: {
+      type?: string;
+      fullPage?: boolean;
+      clip?: { x: number; y: number; width: number; height: number };
+    }) => Promise<Buffer>;
     evaluate: (fn: () => void) => Promise<unknown>;
     route: (
       pattern: string,

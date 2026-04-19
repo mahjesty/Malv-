@@ -8,6 +8,7 @@ import { CommonModule } from "../common/common.module";
 import { CallsModule } from "../calls/calls.module";
 import { CollaborationModule } from "../collaboration/collaboration.module";
 import { MalvStudioModule } from "../malv-studio/malv-studio.module";
+import { ExecutionBridgeModule } from "../execution-bridge/execution-bridge.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { MalvStudioModule } from "../malv-studio/malv-studio.module";
     forwardRef(() => CollaborationModule),
     forwardRef(() => VoiceModule),
     forwardRef(() => MalvStudioModule),
+    forwardRef(() => ExecutionBridgeModule),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

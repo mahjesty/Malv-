@@ -1,0 +1,13 @@
+{
+  "name": "@malv/mobile-sim-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Simulated mobile execution agent (log-based) until native Android exists.",
+  "scripts": {
+    "start": "node src/agent.mjs"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

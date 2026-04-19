@@ -1,0 +1,33 @@
+config:
+  target: "http://127.0.0.1:8080"
+  phases:
+    - duration: 45
+      arrivalRate: 3
+      name: "ws_moderate"
+    - duration: 20
+      arrivalRate: 3
+      rampTo: 10
+      name: "ws_spike"
+  engines:
+    socketio-v3: {}
+  processor: "./artillery.processor.cjs"
+
+scenarios:
+  - name: "ws_chat_burst"
+    engine: "socketio-v3"
+    flow:
+      - emit:
+          channel: "chat:send"
+          namespace: "/malv"
+          data:
+            assistantMessageId: "{{ $uuid }}"
+            message: "Give me a concise production-readiness checklist for a backend service."
+            beastLevel: "Smart"
+      - think: 1
+      - emit:
+          channel: "chat:send"
+          namespace: "/malv"
+          data:
+            assistantMessageId: "{{ $uuid }}"
+            message: "Design a phased rollout and rollback strategy for a real-time AI orchestration pipeline."
+            beastLevel: "Beast"

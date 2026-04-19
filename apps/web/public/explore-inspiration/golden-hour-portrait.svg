@@ -1,0 +1,20 @@
+<svg width="1200" height="800" viewBox="0 0 1200 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="sun" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(850 180) rotate(126) scale(520 460)">
+      <stop stop-color="#FCD34D"/>
+      <stop offset="1" stop-color="#78350F"/>
+    </radialGradient>
+    <linearGradient id="fg" x1="600" y1="0" x2="600" y2="800" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F59E0B" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#1C0F08"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#1A100A"/>
+  <rect width="1200" height="800" fill="url(#sun)" fill-opacity="0.9"/>
+  <ellipse cx="610" cy="510" rx="220" ry="230" fill="#0F0A07" fill-opacity="0.86"/>
+  <ellipse cx="600" cy="330" rx="120" ry="140" fill="#110B07" fill-opacity="0.78"/>
+  <ellipse cx="550" cy="310" rx="35" ry="22" fill="#EAB308" fill-opacity="0.24"/>
+  <ellipse cx="690" cy="310" rx="35" ry="22" fill="#EAB308" fill-opacity="0.24"/>
+  <rect x="460" y="640" width="300" height="160" fill="#130D08"/>
+  <rect width="1200" height="800" fill="url(#fg)"/>
+</svg>

@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import { MalvContinuityPersistenceService, type MalvContinuityPersistedPayload } from "../execution-bridge/malv-continuity-persistence.service";
 
 export type Surface = "chat" | "call" | "execution" | "device";
 
@@ -15,19 +16,41 @@ export class ContinuityBridgeService {
   private readonly ttlMs = 12 * 60 * 1000;
   private readonly store = new Map<string, ContinuityBridgeContext>();
 
-  setContext(sessionId: string, data: Partial<ContinuityBridgeContext>): void {
-    if (!sessionId) return;
-    const prev = this.getContext(sessionId);
-    const merged = this.mergeContext(prev, data);
-    this.store.set(sessionId, merged);
+  constructor(@Optional() private readonly persistence?: MalvContinuityPersistenceService) {}
+
+  private memKey(sessionId: string, continuityUserId?: string | null): string {
+    return continuityUserId ? `${continuityUserId}::${sessionId}` : sessionId;
   }
 
-  getContext(sessionId: string): ContinuityBridgeContext | null {
+  /**
+   * Load durable continuity for this user/session into the in-process bridge (call from chat/call entry).
+   */
+  async hydrate(continuityUserId: string | undefined | null, sessionId: string): Promise<void> {
+    if (!sessionId || !continuityUserId || !this.persistence) return;
+    const row = await this.persistence.load(continuityUserId, sessionId);
+    if (!row) return;
+    const ctx = payloadToContext(row);
+    this.store.set(this.memKey(sessionId, continuityUserId), ctx);
+  }
+
+  setContext(sessionId: string, data: Partial<ContinuityBridgeContext>, continuityUserId?: string | null): void {
+    if (!sessionId) return;
+    const key = this.memKey(sessionId, continuityUserId);
+    const prev = this.getContext(sessionId, continuityUserId);
+    const merged = this.mergeContext(prev, data);
+    this.store.set(key, merged);
+    if (continuityUserId && this.persistence) {
+      void this.persistence.save(continuityUserId, sessionId, contextToPayload(merged));
+    }
+  }
+
+  getContext(sessionId: string, continuityUserId?: string | null): ContinuityBridgeContext | null {
     if (!sessionId) return null;
-    const cur = this.store.get(sessionId);
+    const key = this.memKey(sessionId, continuityUserId);
+    const cur = this.store.get(key);
     if (!cur) return null;
     if (Date.now() - cur.timestamp > this.ttlMs) {
-      this.store.delete(sessionId);
+      this.store.delete(key);
       return null;
     }
     return cur;
@@ -57,18 +80,49 @@ export class ContinuityBridgeService {
     };
   }
 
-  transferContext(fromSurface: Surface, toSurface: Surface, sessionId: string): ContinuityBridgeContext | null {
-    const prev = this.getContext(sessionId);
+  transferContext(
+    fromSurface: Surface,
+    toSurface: Surface,
+    sessionId: string,
+    continuityUserId?: string | null
+  ): ContinuityBridgeContext | null {
+    const prev = this.getContext(sessionId, continuityUserId);
     const merged = this.mergeContext(prev, {
       lastSurface: toSurface,
       lastAction: `transfer:${fromSurface}->${toSurface}`
     });
-    this.store.set(sessionId, merged);
+    const key = this.memKey(sessionId, continuityUserId);
+    this.store.set(key, merged);
+    if (continuityUserId && this.persistence) {
+      void this.persistence.save(continuityUserId, sessionId, contextToPayload(merged));
+    }
     return merged;
   }
 
-  clearContext(sessionId: string): void {
+  clearContext(sessionId: string, continuityUserId?: string | null): void {
     if (!sessionId) return;
-    this.store.delete(sessionId);
+    const key = this.memKey(sessionId, continuityUserId);
+    this.store.delete(key);
   }
+}
+
+function contextToPayload(ctx: ContinuityBridgeContext): MalvContinuityPersistedPayload {
+  return {
+    schemaVersion: 1,
+    activeIntent: ctx.activeIntent,
+    entities: ctx.entities,
+    lastAction: ctx.lastAction,
+    lastSurface: ctx.lastSurface,
+    timestamp: ctx.timestamp
+  };
+}
+
+function payloadToContext(p: MalvContinuityPersistedPayload): ContinuityBridgeContext {
+  return {
+    activeIntent: p.activeIntent,
+    entities: p.entities,
+    lastAction: p.lastAction,
+    lastSurface: (p.lastSurface as Surface) ?? "chat",
+    timestamp: p.timestamp
+  };
 }

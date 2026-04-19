@@ -7,6 +7,7 @@ import type {
   MalvIntentKind,
   MalvScopeSize
 } from "./intent-understanding.types";
+import { resolveBroadPromptExecutionPolicy, shouldTreatClarificationReliefAsUnsafe } from "./malv-broad-request-resolution.util";
 
 const INTENT_ORDER: MalvIntentKind[] = [
   "full_product_build",
@@ -92,6 +93,31 @@ function deriveDomains(message: string, scores: Record<MalvIntentKind, number>):
 }
 
 const VAGUE_ONLY = /^(fix(\s+it)?|help|update|change(\s+it)?|do\s+it|ok\.?|thanks?|hmm\.?)$/i;
+
+/** Short factual / knowledge questions should reach a real model, not autonomous clarification. */
+export function messageLooksLikeKnowledgeOrCasualQuestion(trimmed: string): boolean {
+  const m = trimmed.toLowerCase();
+  if (/\?/.test(trimmed)) return true;
+  if (
+    /\b(what|who|when|where|why|how)\b/i.test(trimmed) ||
+    /\b(explain|define|describe|meaning|difference between|compare|tell me about)\b/i.test(m)
+  ) {
+    return true;
+  }
+  if (/\b(teach\s+me|show\s+me|walk\s+me\s+through|talk\s+me\s+through|step\s+by\s+step|brainstorm|surprise\s+me|pick\s+one)\b/i.test(m)) {
+    return true;
+  }
+  if (/^(what'?s|whats|what is|who is|how (do|does|can|would)|can you explain|could you explain)\b/.test(m)) {
+    return true;
+  }
+  // Explicit reasoning / approach / debugging intent — user is asking MALV to think, not asking for clarification.
+  if (
+    /\b(debug(?:ging)?|diagnos[ei]|think\s+through|deep\s+think(?:ing)?|reason\s+through|work\s+through|analyz[ei]|investigate|audit|review\s+this|evaluate\s+this)\b/i.test(m)
+  ) {
+    return true;
+  }
+  return false;
+}
 
 function scoreIntents(message: string, inputMeta?: MalvInputMetadata | null): Record<MalvIntentKind, number> {
   const scores = emptyScores();
@@ -202,12 +228,25 @@ export class IntentUnderstandingService {
     if (vagueOnly) {
       isAmbiguous = true;
       reason = "message_too_vague";
-    } else if (short && lowSignal) {
+    } else if (short && lowSignal && !messageLooksLikeKnowledgeOrCasualQuestion(trimmed)) {
       isAmbiguous = true;
       reason = "short_low_signal";
-    } else if (trimmed.length < 140 && gap <= 1 && Math.max(...INTENT_ORDER.map((k) => scores[k])) >= 2) {
+    } else if (
+      trimmed.length < 140 &&
+      gap <= 1 &&
+      Math.max(...INTENT_ORDER.map((k) => scores[k])) >= 2 &&
+      !messageLooksLikeKnowledgeOrCasualQuestion(trimmed)
+    ) {
       isAmbiguous = true;
       reason = "intent_tie";
+    }
+
+    if (isAmbiguous && !shouldTreatClarificationReliefAsUnsafe(trimmed)) {
+      const broadPolicy = resolveBroadPromptExecutionPolicy({ userMessage: trimmed });
+      if (broadPolicy.action === "proceed") {
+        isAmbiguous = false;
+        reason = undefined;
+      }
     }
 
     return {

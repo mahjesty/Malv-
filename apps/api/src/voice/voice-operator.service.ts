@@ -15,6 +15,12 @@ import { ReviewSessionEntity } from "../db/entities/review-session.entity";
 import { ReviewFindingEntity, type ReviewFindingCategory, type ReviewFindingSeverity } from "../db/entities/review-finding.entity";
 import type { GlobalRole } from "../workspace/workspace-access.service";
 import { VoicePlaybackService } from "./voice-playback.service";
+import { BeastWorkerClient } from "../beast/client/beast-worker.client";
+import { InferenceRoutingService } from "../inference/inference-routing.service";
+import { ConfigService } from "@nestjs/config";
+import { MalvTaskRouterService } from "../agent-system/router/malv-task-router.service";
+import { malvAgentSystemEnabled } from "../agent-system/malv-agent-system.config";
+import { randomUUID } from "crypto";
 
 /** Where composer voice input should land: normal chat vs operator/Beast workflow. */
 export type VoiceSessionTarget = "composer_chat" | "operator";
@@ -56,7 +62,11 @@ export class VoiceOperatorService {
     @InjectRepository(VoiceOperatorEventEntity) private readonly voiceEvents: Repository<VoiceOperatorEventEntity>,
     @InjectRepository(OperatorTargetEntity) private readonly operatorTargets: Repository<OperatorTargetEntity>,
     @InjectRepository(ReviewSessionEntity) private readonly reviewSessions: Repository<ReviewSessionEntity>,
-    @InjectRepository(ReviewFindingEntity) private readonly reviewFindings: Repository<ReviewFindingEntity>
+    @InjectRepository(ReviewFindingEntity) private readonly reviewFindings: Repository<ReviewFindingEntity>,
+    private readonly beastWorker: BeastWorkerClient,
+    private readonly inferenceRouting: InferenceRoutingService,
+    private readonly cfg: ConfigService,
+    private readonly malvTaskRouter: MalvTaskRouterService
   ) {}
 
   private detectIntent(utterance: string): VoiceIntentType {
@@ -310,7 +320,61 @@ export class VoiceOperatorService {
     });
 
     if (intent === "ask" || intent === "explain" || intent === "summarize") {
-      const conversational = `Voice ${intent} received. Context page=${resolvedContext.page ?? "unknown"} file=${resolvedContext.selectedFile ?? "none"}.`;
+      let conversational = `Voice ${intent} received. Context page=${resolvedContext.page ?? "unknown"} file=${resolvedContext.selectedFile ?? "none"}.`;
+      const voiceLlm = ["1", "true", "yes", "on"].includes(
+        (process.env.MALV_VOICE_CALL_LLM_CONTINUITY_ENABLED ?? "").trim().toLowerCase()
+      );
+      if (voiceLlm) {
+        const route = this.inferenceRouting.decideForCallVoiceContinuity({
+          surface: "call_voice",
+          utteranceLength: args.transcriptText.length,
+          intent
+        });
+        const agentRouter = malvAgentSystemEnabled(this.cfg)
+          ? this.malvTaskRouter.route({
+              traceId: randomUUID(),
+              surface: "voice",
+              userText: args.transcriptText,
+              vaultScoped: false,
+              inputMode: "voice",
+              callActive: Boolean(args.callSessionId)
+            })
+          : null;
+        try {
+          const res = await this.beastWorker.infer({
+            mode: "light",
+            prompt: [
+              "You are MALV on a live voice session. Reply in plain language only (no markdown), at most 3 short sentences.",
+              `Operator intent label: ${intent}.`,
+              `Page: ${resolvedContext.page ?? "unknown"}. File: ${resolvedContext.selectedFile ?? "none"}.`,
+              `User said: ${args.transcriptText}`
+            ].join("\n"),
+            context: {
+              malvPromptAlreadyExpanded: true,
+              malvOperatorMode: "explain",
+              voiceCallContinuity: true,
+              ...route.workerContextPatch,
+              malvRouting: route.telemetry,
+              ...(agentRouter
+                ? {
+                    malvAgentTaskRouter: {
+                      workShape: agentRouter.workShape,
+                      resourceTier: agentRouter.resourceTier,
+                      latencyMode: agentRouter.latencyMode,
+                      planId: agentRouter.plan.planId
+                    }
+                  }
+                : {})
+            }
+          });
+          const txt = (res.reply ?? "").trim();
+          if (txt) conversational = txt;
+        } catch (e) {
+          this.logger.warn(
+            `voice_call_llm_continuity_failed intent=${intent} ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+      }
       await this.voiceEvents.save(
         this.voiceEvents.create({
           user: { id: args.userId } as any,

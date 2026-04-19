@@ -9,10 +9,17 @@ export type ExecutionPlan = {
 
 /**
  * Whether this turn should carry an internal execution plan (actionable / change-oriented).
+ * Lightweight explain/analyze chat should not pay for plan scaffolding unless the message is clearly task-like.
  */
 export function shouldAttachExecutionPlan(mode: ModeType, userMessage: string): boolean {
   const m = userMessage.toLowerCase();
-  if (mode === "execute" || mode === "fix" || mode === "operator_workflow" || mode === "improve") return true;
+  if (mode === "execute" || mode === "fix" || mode === "operator_workflow") return true;
+  if (mode === "improve") {
+    return /\b(refactor|migrate|restructure|optimi[sz]e|clean up|tech debt|rewrite)\b/.test(m);
+  }
+  if (mode === "analyze" || mode === "explain") {
+    return /\b(run|deploy|patch|change|edit|implement|migrate|refactor|fix|debug|build out|ship)\b/.test(m);
+  }
   if (/\b(run|deploy|patch|change|edit|implement|migrate|refactor)\b/.test(m)) return true;
   return false;
 }

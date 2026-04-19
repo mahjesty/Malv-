@@ -25,6 +25,10 @@ import { CollaborationModule } from "./collaboration/collaboration.module";
 import { CodeChangeIntelligenceModule } from "./code-change-intelligence/code-change-intelligence.module";
 import { SecurityModule } from "./security/security.module";
 import { MalvStudioModule } from "./malv-studio/malv-studio.module";
+import { BuildUnitModule } from "./build-units/build-unit.module";
+import { SourceIntakeModule } from "./source-intake/source-intake.module";
+import { DevExploreFixturesModule } from "./dev-seed/dev-explore-fixtures.module";
+import { ExploreImageModule } from "./explore-image/explore-image.module";
 
 @Module({
   imports: [
@@ -72,7 +76,11 @@ import { MalvStudioModule } from "./malv-studio/malv-studio.module";
     SmartHomeModule,
     CollaborationModule,
     CodeChangeIntelligenceModule,
-    MalvStudioModule
+    MalvStudioModule,
+    BuildUnitModule,
+    SourceIntakeModule,
+    DevExploreFixturesModule,
+    ExploreImageModule
   ]
 })
 export class AppModule {}

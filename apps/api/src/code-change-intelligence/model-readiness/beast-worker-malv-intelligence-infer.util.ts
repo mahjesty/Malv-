@@ -32,6 +32,8 @@ export async function inferWorkerText(args: {
   inferTimeoutMs: number;
   promptKey: string;
   signal?: AbortSignal;
+  /** Merged into worker context (e.g. malvInferenceBackend from InferenceRoutingService). */
+  extraContext?: Record<string, unknown>;
 }): Promise<string | null> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), args.inferTimeoutMs);
@@ -44,20 +46,24 @@ export async function inferWorkerText(args: {
     args.signal.addEventListener("abort", forward, { once: true });
   }
   try {
+    const baseCtx: Record<string, unknown> = {
+      malvPromptAlreadyExpanded: true,
+      malvOperatorMode: "analyze",
+      messages: [
+        { role: "system", content: args.systemPrompt },
+        { role: "user", content: args.userText }
+      ],
+      ...(args.extraContext ?? {})
+    };
+    if (baseCtx["malvInferenceBackend"] == null) {
+      baseCtx["malvInferenceBackend"] = "openai_compatible";
+    }
     const res = await args.beastWorker.infer({
       mode: "beast",
       prompt: args.promptKey,
       correlationId: args.correlationId,
       signal: ac.signal,
-      context: {
-        malvPromptAlreadyExpanded: true,
-        malvOperatorMode: "analyze",
-        malvInferenceBackend: "openai_compatible",
-        messages: [
-          { role: "system", content: args.systemPrompt },
-          { role: "user", content: args.userText }
-        ]
-      }
+      context: baseCtx
     });
     const reply = (res.reply ?? "").trim();
     return reply.length ? reply : null;

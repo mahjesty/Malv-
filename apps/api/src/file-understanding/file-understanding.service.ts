@@ -1,4 +1,4 @@
-import { BadRequestException, forwardRef, Inject, Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "crypto";
@@ -58,6 +58,20 @@ export class FileUnderstandingService {
 
   private storageRoot(): string {
     return this.cfg.get<string>("PRIVATE_STORAGE_ROOT") ?? "/tmp/malv-storage";
+  }
+
+  private assertStorageBackendSafeForDeployment() {
+    const mode = (this.cfg.get<string>("MALV_DEPLOYMENT_MODE") ?? "single_instance").toLowerCase();
+    if (mode !== "multi_instance") return;
+    const backend = (this.cfg.get<string>("MALV_STORAGE_BACKEND") ?? "local_private").toLowerCase();
+    if (backend === "local_private") {
+      const shared = (this.cfg.get<string>("MALV_SHARED_FILESYSTEM_CONFIRMED") ?? "false").toLowerCase() === "true";
+      if (!shared) {
+        throw new BadRequestException(
+          "MALV multi-instance requires shared/object storage. Set MALV_SHARED_FILESYSTEM_CONFIRMED=true or use an object-backed storage backend."
+        );
+      }
+    }
   }
 
   private safeOriginalName(name: string): string {
@@ -156,6 +170,7 @@ export class FileUnderstandingService {
     buffer: Buffer;
   }): Promise<{ file: FileEntity; uploadHandle: string }> {
     await this.killSwitch.ensureSystemOnOrThrow({ reason: "file_register_mutation" });
+    this.assertStorageBackendSafeForDeployment();
 
     const maxBytes = Number(this.cfg.get<string>("MALV_UPLOAD_MAX_BYTES") ?? String(52_428_800));
     if (args.buffer.length > maxBytes) {
@@ -476,6 +491,78 @@ export class FileUnderstandingService {
       })),
       total
     };
+  }
+
+  /**
+   * Ensures a file row exists and is owned by the given user (for attaching to user-owned entities).
+   */
+  async assertUserOwnsFile(userId: string, fileId: string): Promise<FileEntity> {
+    const file = await this.files.findOne({ where: { id: fileId }, relations: ["user"] });
+    if (!file || (file.user as { id: string }).id !== userId) {
+      throw new BadRequestException("Invalid or inaccessible file reference.");
+    }
+    return file;
+  }
+
+  /**
+   * Read bytes for a file that must belong to authorUserId (e.g. build unit preview owned by unit author).
+   */
+  async readBinaryForAuthorFile(args: {
+    fileId: string;
+    authorUserId: string;
+  }): Promise<{ buffer: Buffer; mimeType: string | null; fileName: string }> {
+    await this.killSwitch.ensureSystemOnOrThrow({ reason: "files_read" });
+    this.assertStorageBackendSafeForDeployment();
+    const file = await this.files.findOne({ where: { id: args.fileId }, relations: ["user"] });
+    if (!file || (file.user as { id: string }).id !== args.authorUserId) {
+      throw new NotFoundException("File not found.");
+    }
+    const root = path.resolve(this.storageRoot());
+    const rel = file.storageUri.replace(/\\/g, "/").replace(/^\/+/, "");
+    const full = path.resolve(root, rel);
+    const canonicalRoot = await fs.realpath(root).catch(() => null);
+    const canonicalFull = await fs.realpath(full).catch(() => null);
+    if (!canonicalRoot || !canonicalFull || !canonicalFull.startsWith(canonicalRoot + path.sep)) {
+      throw new NotFoundException("File not found.");
+    }
+    const lst = await fs.lstat(canonicalFull).catch(() => null);
+    if (lst?.isSymbolicLink()) {
+      throw new NotFoundException("File not found.");
+    }
+    const buffer = await fs.readFile(canonicalFull);
+    return { buffer, mimeType: file.mimeType ?? null, fileName: file.originalName };
+  }
+
+  /**
+   * Read stored bytes by file id without an ownership check.
+   * Caller must prove the file is an allowed build-unit preview artifact (e.g. linked on a public system unit
+   * or already scoped via getPreviewContentBytes).
+   */
+  async readBinaryForBuildUnitPreviewArtifact(fileId: string): Promise<{
+    buffer: Buffer;
+    mimeType: string | null;
+    fileName: string;
+  }> {
+    await this.killSwitch.ensureSystemOnOrThrow({ reason: "files_read" });
+    this.assertStorageBackendSafeForDeployment();
+    const file = await this.files.findOne({ where: { id: fileId } });
+    if (!file) {
+      throw new NotFoundException("File not found.");
+    }
+    const root = path.resolve(this.storageRoot());
+    const rel = file.storageUri.replace(/\\/g, "/").replace(/^\/+/, "");
+    const full = path.resolve(root, rel);
+    const canonicalRoot = await fs.realpath(root).catch(() => null);
+    const canonicalFull = await fs.realpath(full).catch(() => null);
+    if (!canonicalRoot || !canonicalFull || !canonicalFull.startsWith(canonicalRoot + path.sep)) {
+      throw new NotFoundException("File not found.");
+    }
+    const lst = await fs.lstat(canonicalFull).catch(() => null);
+    if (lst?.isSymbolicLink()) {
+      throw new NotFoundException("File not found.");
+    }
+    const buffer = await fs.readFile(canonicalFull);
+    return { buffer, mimeType: file.mimeType ?? null, fileName: file.originalName };
   }
 
   async getFileDetailForUser(args: { userId: string; fileId: string }) {

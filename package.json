@@ -18,11 +18,13 @@
     "dev:backend": "concurrently -n API,BEAST,SUP -c magenta,green,yellow \"npm run dev:api\" \"npm run dev:beast\" \"npm run dev:supervisor\"",
     "dev:next": "concurrently -n NEXT,API -c cyan,magenta \"npm run dev --prefix apps/malv-frontend\" \"npm run dev -w @malv/api\"",
     "dev": "node scripts/dev-doctor.js && npm run dev:raw",
-    "build": "npm run build -w @malv/web && npm run build -w @malv/api && npm run build -w @malv/beast-worker && npm run build -w @malv/supervisor",
+    "build": "npm run build -w @malv/explore-action-handoff && npm run build -w @malv/web && npm run build -w @malv/api && npm run build -w @malv/beast-worker && npm run build -w @malv/supervisor",
     "typecheck": "npm run typecheck -w @malv/web && npm run typecheck -w @malv/api && npm run typecheck -w @malv/supervisor",
     "lint": "npm run lint -w @malv/web && npm run lint -w @malv/api && npm run lint -w @malv/supervisor",
     "format": "prettier --write .",
-    "smoke:launch": "node scripts/launch-smoke-runner.mjs"
+    "smoke:launch": "node scripts/launch-smoke-runner.mjs",
+    "migration:run": "npm run migration:run -w @malv/api",
+    "migration:revert": "npm run migration:revert -w @malv/api"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

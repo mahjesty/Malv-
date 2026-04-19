@@ -37,17 +37,22 @@ export class VoicePlaybackService {
     audioBase64: string | null;
     audioMimeType: string | null;
     playbackMode: "local_asset" | "local_tts";
+    voiceId?: string | null;
   }> {
     const replyText = VOICE_PIPELINE_TEST_REPLY;
     try {
-      const { wavBytes } = await this.localTts.synthesize({ text: replyText });
-      this.logger.log("[malv-voice-test] playback_mode=local_tts bytes=" + wavBytes.length);
+      const { wavBytes, voiceId } = await this.localTts.synthesize({
+        text: replyText,
+        voiceId: process.env.MALV_DEFAULT_VOICE_ID ?? null
+      });
+      this.logger.log("[malv-voice-test] playback_mode=local_tts bytes=" + wavBytes.length + " voiceId=" + voiceId);
       return {
         replyText,
         audioUrl: null,
         audioBase64: wavBytes.toString("base64"),
         audioMimeType: "audio/wav",
-        playbackMode: "local_tts"
+        playbackMode: "local_tts",
+        voiceId
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -57,7 +62,8 @@ export class VoicePlaybackService {
         audioUrl: VOICE_TEST_PLAYBACK_ASSET_URL,
         audioBase64: null,
         audioMimeType: null,
-        playbackMode: "local_asset"
+        playbackMode: "local_asset",
+        voiceId: null
       };
     }
   }

@@ -1,0 +1,34 @@
+<svg width="1200" height="800" viewBox="0 0 1200 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="600" y1="0" x2="600" y2="800" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A0F2C"/>
+      <stop offset="1" stop-color="#04050B"/>
+    </linearGradient>
+    <linearGradient id="road" x1="600" y1="360" x2="600" y2="800" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B2459" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#0B1027"/>
+    </linearGradient>
+    <filter id="blurBig" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="30"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <ellipse cx="820" cy="210" rx="190" ry="120" fill="#8B5CF6" fill-opacity="0.35" filter="url(#blurBig)"/>
+  <ellipse cx="390" cy="260" rx="240" ry="130" fill="#06B6D4" fill-opacity="0.28" filter="url(#blurBig)"/>
+  <rect x="40" y="250" width="120" height="320" fill="#121A3F"/>
+  <rect x="190" y="210" width="140" height="360" fill="#0D1436"/>
+  <rect x="360" y="180" width="160" height="390" fill="#111941"/>
+  <rect x="560" y="220" width="130" height="350" fill="#0D1331"/>
+  <rect x="720" y="170" width="180" height="400" fill="#11173A"/>
+  <rect x="940" y="230" width="170" height="340" fill="#0E1433"/>
+  <rect x="52" y="290" width="96" height="8" fill="#22D3EE" fill-opacity="0.55"/>
+  <rect x="210" y="265" width="102" height="8" fill="#A78BFA" fill-opacity="0.55"/>
+  <rect x="380" y="245" width="118" height="8" fill="#22D3EE" fill-opacity="0.55"/>
+  <rect x="578" y="275" width="92" height="8" fill="#F472B6" fill-opacity="0.45"/>
+  <rect x="744" y="235" width="132" height="8" fill="#60A5FA" fill-opacity="0.55"/>
+  <rect x="968" y="285" width="138" height="8" fill="#A78BFA" fill-opacity="0.5"/>
+  <path d="M240 800L520 410H680L960 800H240Z" fill="url(#road)"/>
+  <path d="M595 470H605V800H595V470Z" fill="#C4B5FD" fill-opacity="0.45"/>
+  <path d="M560 560H640V572H560V560Z" fill="#67E8F9" fill-opacity="0.35"/>
+  <rect width="1200" height="800" fill="url(#bg)" fill-opacity="0.22"/>
+</svg>

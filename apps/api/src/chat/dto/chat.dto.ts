@@ -1,4 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateIf } from "class-validator";
+import { IsIn, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from "class-validator";
 
 export class ChatRequestDto {
   @IsOptional()
@@ -45,6 +45,12 @@ export class ChatRequestDto {
   @IsOptional()
   @IsIn(["stressed", "calm", "urgent", "focused", "neutral"])
   userMoodHint?: "stressed" | "calm" | "urgent" | "focused" | "neutral";
+
+  /** Explore → Chat canonical handoff (v1 JSON string). Orchestration-only. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20_000)
+  exploreHandoffJson?: string | null;
 
   @IsString()
   @IsNotEmpty()

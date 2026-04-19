@@ -59,6 +59,10 @@ export class InferenceAdminController {
       ok: true,
       configSource: effective.configSource,
       configRevision: effective.configRevision,
+      primaryAuthority: effective.primaryAuthority,
+      ...(effective.dbOverridePresentButInactive ? { dbOverridePresentButInactive: true } : {}),
+      ...(effective.runtimeAuthorityNote ? { runtimeAuthorityNote: effective.runtimeAuthorityNote } : {}),
+      workerRuntimeConfigRevision: worker.runtimeConfigRevision ?? null,
       configuredBackend: effective.effectiveBackend,
       effectiveBackend: effective.effectiveBackend,
       inferenceConfigured: worker.inferenceConfigured,
@@ -96,6 +100,23 @@ export class InferenceAdminController {
     const admin = isAdminActor(req);
     if (!admin) throw new HttpException("Invalid session", HttpStatus.UNAUTHORIZED);
 
+    /**
+     * Env-canonical deployments cannot use the DB row as a second runtime authority for the primary chain.
+     * Physical .env / orchestrator env is updated out-of-band; this API does not mutate host env files.
+     */
+    if (this.inferenceConfig.getPrimaryAuthority() === "env" && dto.enabled) {
+      throw new HttpException(
+        {
+          ok: false,
+          error:
+            "Primary inference is env-canonical (MALV_INFERENCE_PRIMARY_AUTHORITY=env). Persisting an enabled DB override would contradict that contract. " +
+            "Update deployment env (MALV_INFERENCE_BASE_URL, MALV_INFERENCE_MODEL, …) and restart/reload the API so ConfigService picks up changes, or set MALV_INFERENCE_PRIMARY_AUTHORITY=db_compat for legacy DB override compatibility.",
+          primaryAuthority: "env"
+        },
+        HttpStatus.CONFLICT
+      );
+    }
+
     await this.inferenceSettings.upsertOverride(dto, admin.userId);
 
     // Immediately verify worker posture so we don't “silently accept” broken configs.
@@ -124,7 +145,13 @@ export class InferenceAdminController {
       );
     }
 
-    return { ok: true, configSource: effective.configSource, configRevision: effective.configRevision, effectiveConfig: effective.effectiveConfig };
+    return {
+      ok: true,
+      configSource: effective.configSource,
+      configRevision: effective.configRevision,
+      primaryAuthority: effective.primaryAuthority,
+      effectiveConfig: effective.effectiveConfig
+    };
   }
 
   @Post("settings/test")
@@ -138,7 +165,9 @@ export class InferenceAdminController {
       ok: true,
       configSource: effective.configSource,
       configRevision: effective.configRevision,
+      primaryAuthority: effective.primaryAuthority,
       effectiveBackend: effective.effectiveBackend,
+      workerRuntimeConfigRevision: worker.runtimeConfigRevision ?? null,
       workerHealth: worker
     };
   }
@@ -163,7 +192,13 @@ export class InferenceAdminController {
     if (!admin) throw new HttpException("Invalid session", HttpStatus.UNAUTHORIZED);
     await this.inferenceSettings.resetOverride(admin.userId);
     const effective = await this.inferenceConfig.getAdminSettingsPayload();
-    return { ok: true, configSource: effective.configSource, configRevision: effective.configRevision, effectiveConfig: effective.effectiveConfig };
+    return {
+      ok: true,
+      configSource: effective.configSource,
+      configRevision: effective.configRevision,
+      primaryAuthority: effective.primaryAuthority,
+      effectiveConfig: effective.effectiveConfig
+    };
   }
 }
 

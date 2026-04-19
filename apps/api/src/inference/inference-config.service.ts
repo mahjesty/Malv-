@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { ConfigService } from "@nestjs/config";
@@ -9,8 +10,10 @@ import type {
   InferenceConfigSecret,
   InferenceConfigSummary,
   InferenceEffectiveConfig,
-  InferenceBackendCapability
+  InferenceBackendCapability,
+  MalvInferencePrimaryAuthority
 } from "./inference-config.types";
+import { malvEnvFirst, MALV_INFERENCE_AUTHORITY_ENV, MALV_PRIMARY_INFERENCE_ENV } from "./malv-inference-env.util";
 
 function isTruthy(raw: string | undefined): boolean {
   if (raw == null || raw === "") return false;
@@ -96,22 +99,26 @@ function validateConfigCandidate(candidate: EnvConfigInput & { backendType: Infe
   }
 
   if (backendType === "openai_compatible") {
-    if (!baseUrl) errors.push("INFERENCE_BASE_URL (or MALV_OPENAI_COMPAT_BASE_URL) is required for openai_compatible.");
-    if (!model) errors.push("INFERENCE_MODEL (or MALV_INFERENCE_MODEL) is required for openai_compatible.");
+    if (!baseUrl) {
+      errors.push("MALV_INFERENCE_BASE_URL (or INFERENCE_BASE_URL / legacy MALV_OPENAI_COMPAT_BASE_URL) is required for openai_compatible.");
+    }
+    if (!model) errors.push("MALV_INFERENCE_MODEL (or INFERENCE_MODEL) is required for openai_compatible.");
   }
 
   if (backendType === "ollama") {
-    if (!baseUrl) errors.push("INFERENCE_BASE_URL (or MALV_INFERENCE_BASE_URL) is required for ollama.");
-    if (!model) errors.push("INFERENCE_MODEL (or MALV_INFERENCE_MODEL) is required for ollama.");
+    if (!baseUrl) errors.push("MALV_INFERENCE_BASE_URL (or INFERENCE_BASE_URL) is required for ollama.");
+    if (!model) errors.push("MALV_INFERENCE_MODEL (or INFERENCE_MODEL) is required for ollama.");
   }
 
   if (backendType === "llamacpp") {
-    if (!baseUrl) errors.push("INFERENCE_BASE_URL (or MALV_LLAMACPP_BASE_URL) is required for llamacpp.");
-    if (!model) errors.push("INFERENCE_MODEL (or MALV_INFERENCE_MODEL) is required for llamacpp.");
+    if (!baseUrl) {
+      errors.push("MALV_INFERENCE_BASE_URL (or INFERENCE_BASE_URL / legacy MALV_LLAMACPP_BASE_URL) is required for llamacpp.");
+    }
+    if (!model) errors.push("MALV_INFERENCE_MODEL (or INFERENCE_MODEL) is required for llamacpp.");
   }
 
   if (backendType === "transformers") {
-    if (!model) errors.push("INFERENCE_MODEL (or MALV_MODEL_PATH / MALV_TRANSFORMERS_MODEL_PATH) is required for transformers.");
+    if (!model) errors.push("MALV_INFERENCE_MODEL (or INFERENCE_MODEL / MALV_MODEL_PATH / MALV_TRANSFORMERS_MODEL_PATH) is required for transformers.");
   }
 
   if (timeoutMs != null && (!Number.isFinite(timeoutMs) || timeoutMs < 1000)) {
@@ -210,25 +217,55 @@ export class InferenceConfigService {
     private readonly cfg: ConfigService
   ) {}
 
-  private getCanonicalEnv(): EnvConfigInput & { rawSource: "env" } {
-    const backendType =
-      parseBackendType(this.cfg.get<string>("INFERENCE_BACKEND")) ??
-      parseBackendType(this.cfg.get<string>("MALV_INFERENCE_BACKEND"));
+  /**
+   * `db_compat` preserves legacy behavior where a valid enabled DB row can override env for worker effective config.
+   * `env` makes deployment env the sole runtime authority for that chain (DB rows are not applied).
+   */
+  getPrimaryAuthority(): MalvInferencePrimaryAuthority {
+    const raw = malvEnvFirst((k) => this.cfg.get<string>(k), MALV_INFERENCE_AUTHORITY_ENV.PRIMARY);
+    if (raw != null && raw.trim().toLowerCase() === "env") return "env";
+    return "db_compat";
+  }
 
-    const envBaseUrl = this.cfg.get<string>("INFERENCE_BASE_URL");
-    const legacyOpenAICompatBase = this.cfg.get<string>("MALV_OPENAI_COMPAT_BASE_URL");
-    const legacyOllamaBase = this.cfg.get<string>("MALV_INFERENCE_BASE_URL");
-    const legacyLlamaCppBase = this.cfg.get<string>("MALV_LLAMACPP_BASE_URL");
+  private secretsRevisionFingerprint(apiKey: string | null | undefined): string {
+    const raw = apiKey != null ? String(apiKey) : "";
+    return createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 16);
+  }
+
+  /**
+   * Stable revision for env-backed primary inference. Must change when baseUrl, model, credentials, timeouts,
+   * or fallback posture change so beast-worker refreshes its router without requiring a process restart.
+   */
+  private buildEnvInferenceConfigRevision(envCandidate: EnvConfigInput & { rawSource: "env" }): string {
+    const backendType = (envCandidate.backendType ?? "openai_compatible") as InferenceBackendType;
+    const base =
+      backendType === "openai_compatible"
+        ? normalizeOpenAICompatBaseUrl(envCandidate.baseUrl ?? undefined) ?? ""
+        : (envCandidate.baseUrl ?? "").trim().replace(/\/+$/, "");
+    const model = safeLower(envCandidate.model ?? "");
+    const prov = safeLower(malvEnvFirst((k) => this.cfg.get<string>(k), MALV_PRIMARY_INFERENCE_ENV.PROVIDER) ?? String(backendType));
+    const secretFp = this.secretsRevisionFingerprint(backendType === "openai_compatible" ? envCandidate.apiKey : null);
+    const to = envCandidate.timeoutMs != null ? String(envCandidate.timeoutMs) : "null";
+    const fe = envCandidate.fallbackEnabled === true ? "1" : "0";
+    const fpol = safeLower(envCandidate.fallbackPolicy ?? "allow_on_error");
+    return `env:v3:${prov}:${safeLower(base)}:${model}:${secretFp}:${to}:${fe}:${fpol}`;
+  }
+
+  private getCanonicalEnv(): EnvConfigInput & { rawSource: "env" } {
+    const get = (k: string) => this.cfg.get<string>(k);
+    const backendType = parseBackendType(malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.PROVIDER));
+
+    const malvPrimaryBase = malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.BASE_URL);
+    const legacyOpenAICompatBase = malvEnvFirst(get, ["MALV_OPENAI_COMPAT_BASE_URL"]);
+    const legacyLlamaCppBase = malvEnvFirst(get, ["MALV_LLAMACPP_BASE_URL"]);
 
     const baseUrlCandidate =
-      envBaseUrl ??
+      malvPrimaryBase ??
       (backendType === "openai_compatible"
         ? legacyOpenAICompatBase
-        : backendType === "ollama"
-          ? legacyOllamaBase
-          : backendType === "llamacpp"
-            ? legacyLlamaCppBase
-            : undefined);
+        : backendType === "llamacpp"
+          ? legacyLlamaCppBase
+          : undefined);
     let baseUrl: string | null = baseUrlCandidate ? String(baseUrlCandidate) : null;
     if (backendType === "openai_compatible") {
       baseUrl = normalizeOpenAICompatBaseUrl(baseUrl ?? undefined);
@@ -236,10 +273,10 @@ export class InferenceConfigService {
       baseUrl = (baseUrl ?? "").trim().replace(/\/+$/, "") || null;
     }
 
-    const apiKey = this.cfg.get<string>("INFERENCE_API_KEY") ?? this.cfg.get<string>("MALV_OPENAI_COMPAT_API_KEY") ?? null;
-    const model = this.cfg.get<string>("INFERENCE_MODEL") ?? this.cfg.get<string>("MALV_INFERENCE_MODEL") ?? null;
+    const apiKey = malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.API_KEY) ?? null;
+    const model = malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.MODEL) ?? null;
 
-    const timeoutMs = asValidInt(this.cfg.get<string>("INFERENCE_TIMEOUT_MS") ?? this.cfg.get<string>("MALV_INFERENCE_TIMEOUT_MS") ?? undefined);
+    const timeoutMs = asValidInt(malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.TIMEOUT_MS) ?? undefined);
 
     // Production-safe default: disabled fallback by default.
     const nodeEnv = safeLower(this.cfg.get<string>("NODE_ENV"));
@@ -297,8 +334,30 @@ export class InferenceConfigService {
 
   async getEffectiveConfigForWorker(): Promise<InferenceEffectiveConfig> {
     // Worker needs secrets, so this is an internal method guarded by internal auth in the controller.
+    const primaryAuthority = this.getPrimaryAuthority();
     const envCandidate = this.getCanonicalEnv();
     const db = await this.getEnabledDbOverride();
+
+    if (primaryAuthority === "env") {
+      const backendType = (envCandidate.backendType ?? "openai_compatible") as InferenceBackendType;
+      const envValidation = validateConfigCandidate({
+        backendType,
+        baseUrl: envCandidate.baseUrl,
+        apiKey: envCandidate.apiKey,
+        model: envCandidate.model,
+        timeoutMs: envCandidate.timeoutMs,
+        fallbackEnabled: envCandidate.fallbackEnabled,
+        fallbackPolicy: envCandidate.fallbackPolicy
+      });
+      return {
+        configSource: "env",
+        configRevision: this.buildEnvInferenceConfigRevision(envCandidate),
+        effective: this.buildSummaryFromEnv(envCandidate),
+        validation: envValidation.ok ? { ok: true, errors: [] } : envValidation,
+        primaryAuthority: "env",
+        dbOverridePresentButInactive: Boolean(db?.enabled)
+      };
+    }
 
     const dbValidation = db
       ? validateConfigCandidate({
@@ -317,7 +376,8 @@ export class InferenceConfigService {
         configSource: "db_override",
         configRevision: `db:${db.updatedAt.getTime()}:${db.id}`,
         effective: this.buildSummaryFromEntity(db, true),
-        validation: { ok: true, errors: [] }
+        validation: { ok: true, errors: [] },
+        primaryAuthority: "db_compat"
       };
     }
 
@@ -334,11 +394,10 @@ export class InferenceConfigService {
     });
     return {
       configSource: "env",
-      configRevision: `env:${safeLower(this.cfg.get<string>("INFERENCE_BACKEND") ?? this.cfg.get<string>("MALV_INFERENCE_BACKEND") ?? "")}:${safeLower(
-        this.cfg.get<string>("INFERENCE_MODEL") ?? this.cfg.get<string>("MALV_INFERENCE_MODEL") ?? ""
-      )}`,
+      configRevision: this.buildEnvInferenceConfigRevision(envCandidate),
       effective: this.buildSummaryFromEnv(envCandidate),
-      validation: envValidation.ok ? { ok: true, errors: [] } : envValidation
+      validation: envValidation.ok ? { ok: true, errors: [] } : envValidation,
+      primaryAuthority: "db_compat"
     };
   }
 
@@ -409,6 +468,8 @@ export class InferenceConfigService {
       ok: true,
       configSource: resolved.configSource,
       configRevision: resolved.configRevision,
+      primaryAuthority: resolved.primaryAuthority,
+      ...(resolved.dbOverridePresentButInactive ? { dbOverridePresentButInactive: true } : {}),
       config: resolved.effective
     };
   }
@@ -425,6 +486,15 @@ export class InferenceConfigService {
       validation: resolved.validation,
       configSource: resolved.configSource,
       configRevision: resolved.configRevision,
+      primaryAuthority: resolved.primaryAuthority,
+      ...(resolved.dbOverridePresentButInactive ? { dbOverridePresentButInactive: true } : {}),
+      ...(resolved.primaryAuthority === "env"
+        ? {
+            runtimeAuthorityNote:
+              "MALV_INFERENCE_PRIMARY_AUTHORITY=env: the live worker chain follows process env (MALV_INFERENCE_*). " +
+              "This API cannot safely rewrite host .env at runtime. After changing deployment env, restart/reload the **API** process so Nest ConfigService picks up new values; beast-worker refreshes from GET /v1/internal/inference/settings/effective (no worker restart required once the API is serving the new revision)."
+          }
+        : {}),
       effectiveBackend,
       effectiveConfig: resolved.effective
     };

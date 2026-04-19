@@ -4,6 +4,20 @@
  */
 
 export type ProductionSecurityValidationArgs = { isProd: boolean; corsOrigins: string[] };
+export type MalvDeploymentMode = "single_instance" | "multi_instance";
+
+function envFlag(v: string | undefined, fallback = false): boolean {
+  if (v == null || v.trim() === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
+}
+
+export function resolveMalvDeploymentModeFromEnv(env: NodeJS.ProcessEnv): MalvDeploymentMode {
+  const raw = (env.MALV_DEPLOYMENT_MODE ?? "").trim().toLowerCase();
+  if (raw === "multi_instance") return "multi_instance";
+  if (raw === "single_instance") return "single_instance";
+  const replicas = Number(env.MALV_API_EXPECTED_REPLICAS ?? "1");
+  return replicas > 1 ? "multi_instance" : "single_instance";
+}
 
 export function validateSandboxIsolationConfigOrThrow(args: { isProd: boolean }): void {
   const provider = (process.env.SANDBOX_ISOLATION_PROVIDER ?? "local").toLowerCase();
@@ -116,6 +130,46 @@ export function validateProductionSecurityOrThrow(args: ProductionSecurityValida
   }
   if (failures.length > 0) {
     throw new Error(`Production security configuration validation failed: ${failures.join(" ")}`);
+  }
+}
+
+export function validateDistributedSafetyOrThrow(args: { isProd: boolean; env: NodeJS.ProcessEnv }): void {
+  const mode = resolveMalvDeploymentModeFromEnv(args.env);
+  if (mode !== "multi_instance") return;
+
+  const failures: string[] = [];
+  const redisCoordUrl = (args.env.REDIS_COORDINATION_URL ?? args.env.REDIS_URL ?? "").trim();
+  if (!redisCoordUrl) {
+    failures.push("REDIS_COORDINATION_URL or REDIS_URL is required in multi_instance mode.");
+  }
+  const socketAdapterRedis = (args.env.REDIS_SOCKET_IO_ADAPTER_URL ?? args.env.REDIS_URL ?? "").trim();
+  if (!socketAdapterRedis) {
+    failures.push("REDIS_SOCKET_IO_ADAPTER_URL or REDIS_URL is required for distributed Socket.IO.");
+  }
+  const storageBackend = (args.env.MALV_STORAGE_BACKEND ?? "local_private").trim().toLowerCase();
+  const root = (args.env.PRIVATE_STORAGE_ROOT ?? "").trim();
+  if (storageBackend === "local_private" && !envFlag(args.env.MALV_SHARED_FILESYSTEM_CONFIRMED, false)) {
+    failures.push("MALV_SHARED_FILESYSTEM_CONFIRMED=true is required when MALV_STORAGE_BACKEND=local_private in multi_instance mode.");
+  }
+  if (storageBackend === "local_private" && args.isProd && !root) {
+    failures.push("PRIVATE_STORAGE_ROOT must be explicitly configured in production multi_instance mode.");
+  }
+  const workerUrl = (args.env.BEAST_WORKER_BASE_URL ?? "").trim();
+  const workerUrls = (args.env.BEAST_WORKER_BASE_URLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!workerUrl && workerUrls.length === 0) {
+    failures.push("BEAST_WORKER_BASE_URL or BEAST_WORKER_BASE_URLS must be configured.");
+  }
+  if (args.isProd && envFlag(args.env.MALV_BACKGROUND_WORKLOADS_ENABLED, true) && envFlag(args.env.MALV_REALTIME_ENABLED, true)) {
+    const allowCoLocated = envFlag(args.env.MALV_ALLOW_COLOCATED_REALTIME_AND_BACKGROUND, false);
+    if (!allowCoLocated) {
+      failures.push("Set MALV_ALLOW_COLOCATED_REALTIME_AND_BACKGROUND=true to run heavy background + realtime on same node in multi_instance mode.");
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Distributed deployment validation failed (${mode}): ${failures.join(" ")}`);
   }
 }
 

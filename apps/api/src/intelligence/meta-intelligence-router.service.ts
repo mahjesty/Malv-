@@ -149,7 +149,9 @@ export class MetaIntelligenceRouterService {
 
   decide(input: MetaRouterInput): MetaIntelligenceRouterDecision {
     const normalizedInput = this.normalizeInput(input);
-    const bridgeState = normalizedInput.sessionId ? this.continuityBridge.getContext(normalizedInput.sessionId) : null;
+    const bridgeState = normalizedInput.sessionId
+      ? this.continuityBridge.getContext(normalizedInput.sessionId, normalizedInput.continuityOwnerUserId)
+      : null;
     const continuityBridge = this.continuityLayer.getBridgeState();
     const enrichedInput: MetaRouterInput = {
       ...normalizedInput,
@@ -256,12 +258,16 @@ export class MetaIntelligenceRouterService {
     });
     if (normalizedInput.sessionId) {
       try {
-        this.continuityBridge.setContext(normalizedInput.sessionId, {
-          activeIntent: String((layerOutputs.call_context as any)?.liveIntentType ?? enrichedInput.modeType),
-          entities: [(layerOutputs.device_control as any)?.executionTarget].filter(Boolean) as string[],
-          lastAction: (enrichedInput.requestText ?? "").slice(0, 120),
-          lastSurface: ((layerOutputs.chat_to_call_continuity as any)?.activeSurface ?? "chat") as any
-        });
+        this.continuityBridge.setContext(
+          normalizedInput.sessionId,
+          {
+            activeIntent: String((layerOutputs.call_context as any)?.liveIntentType ?? enrichedInput.modeType),
+            entities: [(layerOutputs.device_control as any)?.executionTarget].filter(Boolean) as string[],
+            lastAction: (enrichedInput.requestText ?? "").slice(0, 120),
+            lastSurface: ((layerOutputs.chat_to_call_continuity as any)?.activeSurface ?? "chat") as any
+          },
+          normalizedInput.continuityOwnerUserId
+        );
       } catch {
         // Non-blocking bridge continuity.
       }

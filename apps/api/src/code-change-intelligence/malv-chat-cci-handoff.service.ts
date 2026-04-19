@@ -4,6 +4,22 @@ import { KillSwitchService } from "../kill-switch/kill-switch.service";
 import type { GlobalRole } from "../workspace/workspace-access.service";
 import { WorkspaceAccessService } from "../workspace/workspace-access.service";
 import { CodeChangeIntelligenceService } from "./code-change-intelligence.service";
+import { messageLooksLikeKnowledgeOrCasualQuestion } from "../beast/intent-understanding.service";
+import type { ClassifiedIntent, MalvIntentKind } from "../beast/intent-understanding.types";
+
+const INTENT_ORDER: MalvIntentKind[] = [
+  "full_product_build",
+  "feature_build",
+  "bug_fix",
+  "improvement_refactor",
+  "frontend_design",
+  "backend_logic",
+  "system_upgrade"
+];
+
+function maxIntentScore(classified: ClassifiedIntent): number {
+  return Math.max(...INTENT_ORDER.map((k) => classified.scores[k]));
+}
 
 const HANDOFF_INTENTS = new Set([
   "feature_build",
@@ -46,10 +62,35 @@ export class MalvChatCciHandoffService {
     message: string;
     assistantMessageId: string;
     primaryIntent: string;
+    /** When omitted, expensive audit/plan may run too often — prefer passing full classification. */
+    classifiedIntent?: ClassifiedIntent | null;
   }): Promise<{ contextAppend: string; metaPatch: Record<string, unknown> } | null> {
     if (!this.isEnabled()) return null;
     if (!args.workspaceId) return null;
     if (!this.shouldOfferHandoff(args.primaryIntent)) return null;
+
+    const trimmed = args.message.trim();
+    const maxScore = args.classifiedIntent ? maxIntentScore(args.classifiedIntent) : 0;
+    const changeLike =
+      /\b(implement|patch|migrate|refactor|deploy|ship|release|pull request|pr\b|merge conflict|stack trace|stacktrace|broken|crash|regression|bug\b|doesn'?t work|exception|error:)\b/i.test(
+        trimmed
+      );
+
+    // Narrow gate: skip knowledge-style chat and weak intent scores so CCI is not a default tax on normal turns.
+    if (args.classifiedIntent) {
+      if (messageLooksLikeKnowledgeOrCasualQuestion(trimmed) && maxScore < 6) {
+        this.logger.debug(`CCI handoff skipped: knowledge/casual question with maxScore=${maxScore}`);
+        return null;
+      }
+      if (maxScore < 3) {
+        this.logger.debug(`CCI handoff skipped: intent scores too weak maxScore=${maxScore}`);
+        return null;
+      }
+      if (maxScore < 4 && !changeLike) {
+        this.logger.debug(`CCI handoff skipped: not clearly change- or defect-oriented maxScore=${maxScore}`);
+        return null;
+      }
+    }
 
     const member = await this.workspaceAccess.isWorkspaceMember(args.userId, args.workspaceId);
     if (!member && args.userRole !== "admin") {

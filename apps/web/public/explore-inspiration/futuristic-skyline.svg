@@ -1,0 +1,25 @@
+<svg width="1200" height="800" viewBox="0 0 1200 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="night" x1="600" y1="0" x2="600" y2="800" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B173A"/>
+      <stop offset="0.5" stop-color="#0A1230"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#night)"/>
+  <ellipse cx="620" cy="180" rx="300" ry="120" fill="#38BDF8" fill-opacity="0.24"/>
+  <rect x="80" y="300" width="110" height="290" fill="#101D44"/>
+  <rect x="230" y="250" width="125" height="340" fill="#0D1A40"/>
+  <rect x="390" y="200" width="140" height="390" fill="#11214E"/>
+  <rect x="570" y="150" width="150" height="440" fill="#0F1D46"/>
+  <rect x="760" y="210" width="140" height="380" fill="#10204D"/>
+  <rect x="940" y="265" width="135" height="325" fill="#0E1B40"/>
+  <rect x="110" y="340" width="50" height="6" fill="#7DD3FC" fill-opacity="0.45"/>
+  <rect x="255" y="295" width="70" height="6" fill="#A78BFA" fill-opacity="0.42"/>
+  <rect x="418" y="255" width="76" height="6" fill="#7DD3FC" fill-opacity="0.48"/>
+  <rect x="600" y="212" width="88" height="6" fill="#93C5FD" fill-opacity="0.52"/>
+  <rect x="786" y="262" width="78" height="6" fill="#A78BFA" fill-opacity="0.4"/>
+  <rect x="962" y="305" width="83" height="6" fill="#7DD3FC" fill-opacity="0.45"/>
+  <path d="M0 615C178 576 348 575 530 612C721 650 930 650 1200 610V800H0V615Z" fill="#050C23"/>
+  <rect width="1200" height="800" fill="#020617" fill-opacity="0.15"/>
+</svg>

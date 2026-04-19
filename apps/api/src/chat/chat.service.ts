@@ -15,6 +15,21 @@ import { KillSwitchService } from "../kill-switch/kill-switch.service";
 import { ChatRunRegistryService } from "./chat-run-registry.service";
 import { CollaborationSummaryService } from "../collaboration/collaboration-summary.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE } from "../beast/malv-chat-agent-unavailable.constants";
+import { sanitizeMalvChatAssistantMetaForUser } from "../beast/malv-chat-assistant-meta-sanitize.util";
+import type { MalvAssistantTurnOutcome } from "../inference/malv-local-inference-execution-result";
+import { MalvValidationTelemetryService } from "../common/malv-validation-telemetry.service";
+import { enforceMalvFinalReplyIdentityPolicy } from "../beast/malv-final-reply-identity-validator";
+import { assertMalvAssistantIdentityGate } from "../beast/malv-finalize-assistant-output.util";
+import { applyMalvAssistantVisibleCompletionBackstop } from "../beast/malv-turn-outcome-backstop.util";
+
+export type MalvAssistantStreamChunkEvt = {
+  conversationId: string;
+  runId: string;
+  text: string;
+  /** Always false — terminal done is sent once via `malv:orchestration` after finalization. */
+  done: false;
+};
 
 export type ChatHandleResult = {
   reply: string;
@@ -25,6 +40,8 @@ export type ChatHandleResult = {
   assistantMessageId: string;
   /** When true, caller must invoke finalizeAssistantTurn after streaming */
   deferAssistantPersist?: boolean;
+  /** Canonical turn outcome for WS finalization (mirrors meta.malvTurnOutcome when set). */
+  malvTurnOutcome?: MalvAssistantTurnOutcome;
 };
 
 @Injectable()
@@ -41,11 +58,12 @@ export class ChatService {
     @InjectRepository(CollaborationRoomEntity) private readonly rooms: Repository<CollaborationRoomEntity>,
     @InjectRepository(RoomMemberEntity) private readonly roomMembers: Repository<RoomMemberEntity>,
     private readonly collaborationSummary: CollaborationSummaryService,
-    @Inject(forwardRef(() => RealtimeGateway)) private readonly realtime: RealtimeGateway
+    @Inject(forwardRef(() => RealtimeGateway)) private readonly realtime: RealtimeGateway,
+    private readonly validationTelemetry: MalvValidationTelemetryService
   ) {}
 
   /**
-   * Persist final assistant row after WS chunk loop (supports partial text on cancel mid-stream).
+   * Single canonical persistence path for an assistant turn (HTTP or WS).
    */
   async finalizeAssistantTurn(args: {
     userId: string;
@@ -53,7 +71,9 @@ export class ChatService {
     assistantMessageId: string;
     runId: string;
     content: string;
-    status: "done" | "interrupted";
+    status: "done" | "interrupted" | "error";
+    /** Refines UX for successful rows; ignored when status is interrupted. */
+    malvTurnOutcome?: Extract<MalvAssistantTurnOutcome, "complete" | "partial_done">;
     meta?: Record<string, unknown>;
     source?: string;
   }) {
@@ -64,19 +84,53 @@ export class ChatService {
       this.logger.warn(`[MALV CHAT] finalizeAssistantTurn missing row id=${args.assistantMessageId}`);
       return;
     }
-    row.content = args.content;
-    row.status = args.status;
-    row.source = args.source ?? (args.status === "interrupted" ? "interrupted" : "beast_pipeline");
+    const failedBeforeOutput = args.status === "error";
+    const initialMetaTurn: MalvAssistantTurnOutcome | undefined = failedBeforeOutput
+      ? "failed_before_output"
+      : args.status === "interrupted"
+        ? undefined
+        : args.malvTurnOutcome === "partial_done"
+          ? "partial_done"
+          : "complete";
+
+    /** Final identity gate on every persisted assistant body (or empty probe when status=error). */
+    const identityValidated = enforceMalvFinalReplyIdentityPolicy(args.content ?? "");
+    row.content = failedBeforeOutput ? "" : identityValidated.text;
+    row.status = args.status === "interrupted" ? "interrupted" : failedBeforeOutput ? "error" : "done";
+    row.source =
+      args.source ??
+      (args.status === "interrupted" ? "interrupted" : failedBeforeOutput ? "malv_chat_failed_before_output" : "beast_pipeline");
     row.run = { id: args.runId } as AiJobEntity;
+    const backstop = initialMetaTurn
+      ? applyMalvAssistantVisibleCompletionBackstop({
+          meta: {
+            ...(args.meta ?? {}),
+            malvTurnOutcome: initialMetaTurn
+          },
+          reply: identityValidated.text,
+          runId: args.runId,
+          logger: this.logger,
+          logContext: "assistant_message_persist"
+        })
+      : null;
+    const finalTurnOutcome = backstop?.outcome ?? initialMetaTurn;
+    const finalMeta = backstop?.meta ?? { ...(args.meta ?? {}) };
     row.metadata = {
-      ...(args.meta ?? {}),
+      ...finalMeta,
       runId: args.runId,
       malvPlaceholder: false,
-      malvTerminal: args.status === "interrupted" ? "interrupted" : "completed"
+      malvTerminal: args.status === "interrupted" ? "interrupted" : failedBeforeOutput ? "error" : "completed",
+      ...(identityValidated
+        ? {
+            malvFinalIdentityEnforcementMode: identityValidated.mode,
+            malvFinalIdentityViolation: identityValidated.hadViolation
+          }
+        : {}),
+      ...(finalTurnOutcome !== undefined ? { malvTurnOutcome: finalTurnOutcome } : {})
     };
     await this.messages.save(row);
     this.logger.log(
-      `[MALV CHAT] reply persisted messageId=${args.assistantMessageId} status=${args.status} replyLen=${args.content.length}`
+      `[MALV CHAT] assistant_finalized messageId=${args.assistantMessageId} rowStatus=${row.status} turnOutcome=${finalTurnOutcome ?? "n/a"} replyLen=${failedBeforeOutput ? 0 : args.content.length} runId=${args.runId}`
     );
   }
 
@@ -90,7 +144,7 @@ export class ChatService {
     }
     const trimmed = (reply ?? "").trim();
     if (trimmed.length > 0) {
-      return trimmed;
+      return assertMalvAssistantIdentityGate(trimmed);
     }
     const proofOn =
       this.cfg.get<string>("MALV_BRAIN_PROOF_NONEMPTY") === "true" ||
@@ -100,9 +154,9 @@ export class ChatService {
       return "MALV core active. This is a verified backend response.";
     }
     this.logger.error(
-      "[MALV CHAT] empty final reply after orchestrator — emitting diagnostic (check [MALV BRAIN] worker/fallback lengths)"
+      "[MALV CHAT] empty final reply after orchestrator — emitting user-safe notice (see [MALV BRAIN] worker/fallback logs)"
     );
-    return "MALV finished this turn but the combined worker and fallback layers returned no visible text. Check API logs for [MALV BRAIN] worker reply length and [MALV BRAIN] fallback reply length, and worker logs for infer_return.";
+    return MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE;
   }
 
   async handleChat(args: {
@@ -119,7 +173,10 @@ export class ChatService {
     inputMeta?: MalvInputMetadata | null;
     /** WebSocket: persist assistant only after streaming */
     deferAssistantPersist?: boolean;
+    /** WebSocket: real-time local inference tokens (see BeastOrchestratorService). */
+    onAssistantStreamChunk?: (evt: MalvAssistantStreamChunkEvt) => void;
   }): Promise<ChatHandleResult> {
+    const requestReceivedAtMs = Date.now();
     this.logger.log(
       `[MALV CHAT] request received userId=${args.userId} conversationId=${args.conversationId ?? "new"} assistantMessageId=${args.assistantMessageId ?? "none"}`
     );
@@ -219,16 +276,24 @@ export class ChatService {
         vaultSessionId: args.vaultSessionId ?? null,
         assistantMessageId: assistantId,
         abortSignal: signal,
-        inputMeta: args.inputMeta ?? null
+        inputMeta: args.inputMeta ?? null,
+        onAssistantStreamChunk: args.onAssistantStreamChunk
       });
 
       const beforeGuarantee = beastRes.reply ?? "";
+      if (!args.onAssistantStreamChunk) {
+        this.validationTelemetry.startTurn({
+          runId: beastRes.runId,
+          transport: "http",
+          requestReceivedAtMs
+        });
+      }
       const visibleReply = this.ensureVisibleReply(beastRes.reply, beastRes.interrupted);
       this.logger.log(
         `[MALV BRAIN] orchestration complete replyLenBeforeGuarantee=${beforeGuarantee.length} replyLenAfter=${visibleReply.length} runId=${beastRes.runId} interrupted=${Boolean(beastRes.interrupted)} defer=${Boolean(args.deferAssistantPersist)}`
       );
 
-      const metaOut = {
+      const metaOut: Record<string, unknown> = {
         ...(beastRes.meta ?? {}),
         runId: beastRes.runId,
         malvTerminal: beastRes.interrupted ? "interrupted" : "completed",
@@ -236,6 +301,20 @@ export class ChatService {
           ? { malvReplyCoerced: true, malvReplyLenBeforeCoerce: beforeGuarantee.length }
           : {})
       };
+      if (!args.onAssistantStreamChunk) {
+        this.validationTelemetry.completeTurn({
+          runId: beastRes.runId,
+          transport: "http",
+          meta: metaOut,
+          requestReceivedAtMs
+        });
+      }
+
+      const turnOutcomeFromMeta = metaOut["malvTurnOutcome"] as MalvAssistantTurnOutcome | undefined;
+      const malvTurnOutcome: MalvAssistantTurnOutcome | undefined =
+        turnOutcomeFromMeta === "partial_done" || turnOutcomeFromMeta === "complete" || turnOutcomeFromMeta === "failed_before_output"
+          ? turnOutcomeFromMeta
+          : undefined;
 
       if (beastRes.interrupted) {
         await this.finalizeAssistantTurn({
@@ -256,6 +335,7 @@ export class ChatService {
           runId: beastRes.runId,
           content: visibleReply,
           status: "done",
+          malvTurnOutcome: malvTurnOutcome === "partial_done" ? "partial_done" : "complete",
           meta: metaOut,
           source: String(beastRes.meta?.malvReplySource ?? "beast_pipeline")
         });
@@ -278,21 +358,54 @@ export class ChatService {
         runId: beastRes.runId,
         interrupted: beastRes.interrupted,
         assistantMessageId: assistantId,
-        deferAssistantPersist: Boolean(args.deferAssistantPersist) && !beastRes.interrupted
+        deferAssistantPersist: Boolean(args.deferAssistantPersist) && !beastRes.interrupted,
+        malvTurnOutcome
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.error(`[MALV CHAT] handleChat failed ${msg}`);
+      this.logger.error(`[MALV CHAT] handleChat failed internalDetail=${msg.replace(/\s+/g, " ").slice(0, 800)}`);
+      const errorRunId = randomUUID();
+      const safeMeta = sanitizeMalvChatAssistantMetaForUser({
+        runId: errorRunId,
+        malvReplySource: "chat_api_exception_safe_reply",
+        malvTurnFailed: true,
+        malvTerminal: "error"
+      });
+      this.validationTelemetry.completeTurn({
+        runId: errorRunId,
+        transport: args.onAssistantStreamChunk ? "ws" : "http",
+        meta: safeMeta,
+        requestReceivedAtMs
+      });
       await this.messages.update(
         { id: assistantId },
         {
-          content: `MALV could not complete this turn: ${msg}`,
-          status: "error",
-          source: "malv_error",
-          metadata: { malvPlaceholder: false, error: msg }
+          content: MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE,
+          status: "done",
+          source: "malv_chat_safe_error_reply",
+          metadata: {
+            ...safeMeta,
+            malvPlaceholder: false
+          }
         }
       );
-      throw e;
+      const finalAssistant = await this.messages.findOne({ where: { id: assistantId } });
+      if (finalAssistant) {
+        await this.emitRealtimeMessageUpdate({
+          actorUserId: args.userId,
+          conversation,
+          message: finalAssistant
+        });
+      }
+      return {
+        reply: MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE,
+        meta: safeMeta,
+        conversationId: conversation.id,
+        runId: errorRunId,
+        interrupted: false,
+        assistantMessageId: assistantId,
+        deferAssistantPersist: false
+      };
     } finally {
       if (ac && args.assistantMessageId) {
         this.runRegistry.unregisterTurn(args.assistantMessageId);

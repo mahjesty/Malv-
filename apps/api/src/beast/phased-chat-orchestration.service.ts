@@ -1,10 +1,11 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { KillSwitchService } from "../kill-switch/kill-switch.service";
 import type { BeastInferenceResponse } from "./client/beast-worker.client";
 import { BeastWorkerClient } from "./client/beast-worker.client";
 import { INTERNAL_PHASE_LABELS } from "./autonomous-orchestration.prompt";
 import type { InternalPhaseId } from "./execution-strategy.service";
+import { malvSimulationEnabled } from "../common/malv-validation-flags.util";
 
 export type MalvChatPhaseTraceEntry = {
   phaseId: InternalPhaseId;
@@ -37,6 +38,8 @@ export function buildPhasedStepUserMessage(args: {
  */
 @Injectable()
 export class PhasedChatOrchestrationService {
+  private readonly logger = new Logger(PhasedChatOrchestrationService.name);
+
   constructor(
     private readonly cfg: ConfigService,
     private readonly worker: BeastWorkerClient,
@@ -54,9 +57,11 @@ export class PhasedChatOrchestrationService {
     mode: "light" | "beast";
     buildPrompt: (userMessageForStep: string) => string;
     baseAggregated: Record<string, unknown>;
+    maxTokens?: number;
     signal?: AbortSignal;
     synthesizeFallback: (reason: string) => BeastInferenceResponse;
     onPhaseStart?: (phase: InternalPhaseId, index: number, total: number) => void;
+    onPhaseComplete?: (entry: MalvChatPhaseTraceEntry) => void;
   }): Promise<{ combinedReply: string; trace: MalvChatPhaseTraceEntry[]; lastMeta: Record<string, unknown> }> {
     const trace: MalvChatPhaseTraceEntry[] = [];
     const priorBodies: string[] = [];
@@ -79,6 +84,9 @@ export class PhasedChatOrchestrationService {
       }
       const phase = args.phases[i]!;
       args.onPhaseStart?.(phase, i, total);
+      if (malvSimulationEnabled((k) => this.cfg.get<string>(k), "MALV_SIMULATE_SLOW_PHASE_COMPLETION")) {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      }
       await this.killSwitch.ensureSystemOnOrThrow({ reason: "phased_chat_worker_step" });
 
       const userMessageForStep = buildPhasedStepUserMessage({
@@ -108,6 +116,7 @@ export class PhasedChatOrchestrationService {
         const res = await this.worker.infer({
           mode: args.mode,
           prompt,
+          maxTokens: args.maxTokens,
           context: ctx,
           signal: args.signal
         });
@@ -115,10 +124,13 @@ export class PhasedChatOrchestrationService {
         lastMeta = { ...(res.meta ?? {}) };
       } catch (e) {
         detail = e instanceof Error ? e.message : String(e);
+        this.logger.warn(
+          `[MALV PHASED] worker infer failed phase=${phase} phaseIndex=${i} internalDetail=${(detail ?? "").replace(/\s+/g, " ").slice(0, 480)}`
+        );
         producer = "fallback_brain";
         const fb = args.synthesizeFallback(detail ?? "worker_error");
         reply = (fb.reply ?? "").trim();
-        lastMeta = { ...(fb.meta ?? {}), malvPhasedStepWorkerError: detail };
+        lastMeta = { ...(fb.meta ?? {}) };
       }
 
       if (!reply) {
@@ -128,7 +140,7 @@ export class PhasedChatOrchestrationService {
         lastMeta = { ...(fb.meta ?? {}), malvPhasedStepEmpty: true };
       }
 
-      trace.push({
+      const entry: MalvChatPhaseTraceEntry = {
         phaseId: phase,
         phaseLabel: INTERNAL_PHASE_LABELS[phase],
         index: i,
@@ -137,7 +149,9 @@ export class PhasedChatOrchestrationService {
         replyChars: reply.length,
         producer,
         detail
-      });
+      };
+      trace.push(entry);
+      args.onPhaseComplete?.(entry);
 
       if (reply) {
         priorBodies.push(reply);

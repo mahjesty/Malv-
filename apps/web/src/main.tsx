@@ -6,6 +6,7 @@ import { ThemeProvider } from "./lib/theme/ThemeProvider";
 import { AuthProvider } from "./lib/auth/AuthProvider";
 import App from "./App";
 import "./styles/index.css";
+import "./styles/malv.css";
 import "./styles/landing-v0.css";
 import "./styles/malv-dashboard-v0.css";
 import "./styles/malv-operator.css";

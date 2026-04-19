@@ -190,6 +190,8 @@ def create_infer_router(router: Optional[APIRouter] = None) -> APIRouter:
             "ok": True,
             "ts": int(time.time()),
             "service": "beast-worker",
+            # Mirrors API `configRevision` so admin/health can confirm API↔worker alignment without guessing.
+            "configRevision": _active_config_revision,
             "inferenceConfigured": agg.get("inferenceConfigured"),
             "inferenceReady": agg.get("inferenceReady"),
             "primaryBackend": agg.get("primaryBackend"),

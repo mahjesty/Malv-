@@ -10,6 +10,8 @@ import { malvChatPipelineLog } from "../../lib/chat/malvChatPipelineLog";
 import { isMalvChatDebugEnabled } from "../../lib/chat/malvChatDebug";
 import { Button, AlertBanner, LogoMark } from "@malv/ui";
 import { ChatMessageBubble } from "../../components/chat/ChatMessageBubble";
+import { PresenceLayer, type PresenceMode } from "../../components/chat/PresenceLayer";
+import { shouldRenderVisibleThought } from "../../lib/chat/malvVisibleThoughtState";
 import { useMalvChat, type UseMalvChatOptions } from "../../lib/chat/useMalvChat";
 import { useChatAutoScroll } from "../../lib/chat/useChatAutoScroll";
 import { useAuth } from "../../lib/auth/AuthContext";
@@ -23,6 +25,7 @@ import { MobileSidebarTrigger } from "../../components/navigation/MobileSidebarT
 import { useVoiceCallShell } from "../../lib/voice/VoiceCallShellContext";
 import { clearVideoChatContext, loadVideoChatContext } from "../../lib/video/videoChatContext";
 import { createWorkspaceRuntimeSession, fetchCollaborationRoom } from "../../lib/api/dataPlane";
+import { consumeExploreChatHandoffStash } from "../../lib/explore/exploreChatHandoffStorage";
 
 /** Operator channel — upload MALV presentation with real `useMalvChat` + transport. */
 
@@ -71,6 +74,11 @@ export function ChatHomePage() {
   const chatRootRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<OperatorChatComposerHandle>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
+  const [exploreHandoffCard, setExploreHandoffCard] = useState<{
+    originLine: string;
+    subtitle: string;
+    intentLine: string;
+  } | null>(null);
   const dismissRevealedUserActions = useCallback(() => setRevealedUserActionMessageId(null), []);
   const revealUserActionsForMessage = useCallback((id: string) => setRevealedUserActionMessageId(id), []);
 
@@ -102,6 +110,8 @@ export function ChatHomePage() {
     conversationId,
     sending,
     generationActive,
+    isThinking,
+    thinkingSteps,
     conversationLoading,
     threadError,
     threadErrorDiagnostic,
@@ -129,6 +139,27 @@ export function ChatHomePage() {
   const confidenceHint = String(lastAssistant?.metadata?.confidence ?? "").toLowerCase();
   const confidenceLabel = confidenceHint === "high" ? "High confidence" : confidenceHint === "low" ? "Low confidence" : confidenceHint ? "Medium confidence" : "";
   const continuityHint = String(lastAssistant?.metadata?.continuityMode ?? "");
+
+  /**
+   * Derive presence mode from live chat state.
+   * Maps to the PresenceLayer environment without any extra API calls.
+   * Uses the same “visible stream” rule as the bubble ({@link deriveMalvPresenceUsesStreamingAmbient} via `presence`).
+   *
+   *  idle      — no activity, no composer content
+   *  composing — user has text in the composer (MALV is "listening")
+   *  thinking  — turn in flight before visible reply text is painted
+   *  streaming — user-visible reply text is forming (not merely pre-token / cadence-hold)
+   *  error     — thread has a hard error
+   */
+  const presenceMode = useMemo<PresenceMode>(() => {
+    if (threadError) return "error";
+    if (sending) return "thinking";
+    if (generationActive) {
+      return presence.phase === "active" ? "streaming" : "thinking";
+    }
+    if (input.trim().length > 0) return "composing";
+    return "idle";
+  }, [threadError, sending, generationActive, presence.phase, input]);
 
   const inputRef = useRef(input);
   inputRef.current = input;
@@ -192,11 +223,19 @@ export function ChatHomePage() {
     [forkFromAssistantMessage, loadConversationById, queryClient, setActiveChatId]
   );
 
+  const onOpenRuntimeDetail = useCallback(
+    (sessionId: string) => {
+      openRuntimeDrawer({ sessionId, conversationId: conversationId ?? null });
+    },
+    [openRuntimeDrawer, conversationId]
+  );
+
   const { listRef, scrollToBottom, scrollIfStuck } = useChatAutoScroll();
 
   /** Explicit new chat: clear client state and strip `conversationId` from the URL (deterministic fresh thread). */
   useEffect(() => {
     if (searchParams.get("fresh") !== "1") return;
+    setExploreHandoffCard(null);
     startNewConversation();
     prevRouteConversationIdRef.current = null;
     setSearchParams(
@@ -209,6 +248,34 @@ export function ChatHomePage() {
       { replace: true }
     );
   }, [searchParams, setSearchParams, startNewConversation]);
+
+  useEffect(() => {
+    if (searchParams.get("exploreChatHandoff") !== "1") return;
+    const stash = consumeExploreChatHandoffStash();
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("exploreChatHandoff");
+        return next;
+      },
+      { replace: true }
+    );
+    if (!stash) return;
+    setExploreHandoffCard({
+      originLine: stash.originLine,
+      subtitle: stash.cardSubtitle,
+      intentLine: stash.intentLine
+    });
+    setInput((prev) => {
+      const v = stash.visibleComposerText.trim();
+      if (!v) return prev;
+      return prev.trim() ? `${prev}\n\n${v}` : v;
+    });
+  }, [searchParams, setSearchParams, setInput]);
+
+  useEffect(() => {
+    if (messages.some((m) => m.role === "user")) setExploreHandoffCard(null);
+  }, [messages]);
 
   /** Route-driven load: `?conversationId=` is the source of truth for which thread is active. */
   useEffect(() => {
@@ -462,7 +529,10 @@ export function ChatHomePage() {
       scrollToBottom("smooth");
       return;
     }
-    if (last.role === "assistant" && (last.status === "streaming" || last.status === "thinking")) {
+    if (
+      last.role === "assistant" &&
+      (last.status === "streaming" || last.status === "thinking" || last.status === "preparing")
+    ) {
       scrollIfStuck("auto");
     }
   }, [messages, scrollIfStuck, scrollToBottom]);
@@ -623,6 +693,24 @@ export function ChatHomePage() {
             <LogoMark size={44} variant="animated" className="text-malv-text" />
           </motion.div>
           <p className="mb-7 text-center text-sm text-malv-text/60">{heroOneLiner}</p>
+          {exploreHandoffCard ? (
+            <div className="mb-6 w-full max-w-xl rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 text-left shadow-sm backdrop-blur-sm">
+              <p className="text-[11px] font-medium tracking-wide text-malv-text/50">
+                <span className="text-malv-text/38">[ </span>
+                {exploreHandoffCard.originLine}
+                <span className="text-malv-text/38"> ]</span>
+              </p>
+              <p className="mt-1 text-sm font-medium text-malv-text/90">{exploreHandoffCard.subtitle}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-malv-text/55">{exploreHandoffCard.intentLine}</p>
+              <button
+                type="button"
+                className="mt-3 text-[11px] font-medium text-malv-text/40 transition-colors hover:text-malv-text/60"
+                onClick={() => setExploreHandoffCard(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
           <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
             {starterPrompts.slice(0, 4).map((p) => (
               <motion.button
@@ -654,8 +742,15 @@ export function ChatHomePage() {
           </div>
         </div>
       ) : (
-        messages.map((msg) => {
+        <>
+          {messages.map((msg) => {
           if (msg.role === "system") return null;
+          const isLastAssistant =
+            msg.role === "assistant" &&
+            messages.findLast((m) => m.role === "assistant")?.id === msg.id;
+          const thoughtVisible =
+            isLastAssistant &&
+            shouldRenderVisibleThought({ generationActive, isThinking, thinkingSteps, messages });
           return (
             <div key={msg.id}>
               <ChatMessageBubble
@@ -671,13 +766,14 @@ export function ChatHomePage() {
                 onRevealUserMessageActions={msg.role === "user" ? () => revealUserActionsForMessage(msg.id) : undefined}
                 onDismissUserMessageActions={msg.role === "user" ? dismissRevealedUserActions : undefined}
                 onEditStateChange={onMessageEditStateChange}
-                onOpenRuntimeDetail={(sessionId) =>
-                  openRuntimeDrawer({ sessionId, conversationId: conversationId ?? null })
-                }
+                onOpenRuntimeDetail={onOpenRuntimeDetail}
+                visibleThought={thoughtVisible}
+                visibleThoughtLines={thoughtVisible ? thinkingSteps : undefined}
               />
             </div>
           );
-        })
+          })}
+        </>
       )}
     </div>
   );
@@ -695,6 +791,9 @@ export function ChatHomePage() {
       onDragOverCapture={onChatDragOverCapture}
       onDropCapture={onChatDropCapture}
     >
+      {/* Environment presence layer — sits at z-1 behind all transcript content */}
+      <PresenceLayer mode={presenceMode} />
+
       <header className="malv-chat-topbar malv-header relative z-10 flex shrink-0 items-center justify-between gap-3 px-3 py-2.5 sm:px-5">
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <MobileSidebarTrigger />
@@ -792,8 +891,8 @@ export function ChatHomePage() {
           </div>
         </div>
 
-        <div className="malv-chat-composer-dock shrink-0 z-40 pt-3 pb-[max(0.45rem,env(safe-area-inset-bottom))] sm:pb-1.5 lg:pt-2 lg:pb-0" style={composerGradientStyle}>
-          <div className="mx-auto w-full max-w-[860px] min-w-0 px-2.5 sm:px-4">{composer}</div>
+        <div className="malv-chat-composer-dock shrink-0 z-40 pt-1.5 pb-[max(0.35rem,env(safe-area-inset-bottom))] sm:pb-1 lg:pt-1.5 lg:pb-0" style={composerGradientStyle}>
+          <div className="mx-auto w-full max-w-[860px] min-w-0 px-2 sm:px-3">{composer}</div>
         </div>
       </div>
 

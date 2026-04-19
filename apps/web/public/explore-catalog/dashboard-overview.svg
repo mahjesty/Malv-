@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480" role="img" aria-label="Dashboard preview">
+  <defs>
+    <linearGradient id="bg-dash" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#172554"/>
+    </linearGradient>
+    <linearGradient id="acc-dash" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="480" fill="url(#bg-dash)"/>
+  <rect x="0" y="0" width="800" height="44" fill="rgb(15 23 42 / 0.88)"/>
+  <circle cx="22" cy="22" r="5" fill="#f87171"/><circle cx="42" cy="22" r="5" fill="#fbbf24"/><circle cx="62" cy="22" r="5" fill="#4ade80"/>
+  <text x="80" y="28" fill="rgb(148 163 184)" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="600">template</text>
+  <text x="400" y="108" text-anchor="middle" fill="#f8fafc" font-family="ui-sans-serif,system-ui,sans-serif" font-size="30" font-weight="800">Dashboard</text>
+  <text x="400" y="148" text-anchor="middle" fill="rgb(148 163 184)" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15">KPIs � trends � activity</text>
+  <rect x="64" y="188" width="672" height="72" rx="12" fill="rgb(30 41 59 / 0.9)" stroke="rgb(51 65 85)" stroke-width="1"/>
+  <rect x="84" y="208" width="120" height="32" rx="8" fill="url(#acc-dash)" opacity="0.35"/>
+  <rect x="220" y="208" width="120" height="32" rx="8" fill="rgb(51 65 85 / 0.8)"/>
+  <rect x="356" y="208" width="120" height="32" rx="8" fill="rgb(51 65 85 / 0.8)"/>
+  <rect x="492" y="208" width="120" height="32" rx="8" fill="rgb(51 65 85 / 0.8)"/>
+  <rect x="64" y="278" width="420" height="170" rx="12" fill="rgb(30 41 59 / 0.85)" stroke="rgb(51 65 85)" stroke-width="1"/>
+  <rect x="500" y="278" width="236" height="170" rx="12" fill="rgb(30 41 59 / 0.85)" stroke="rgb(51 65 85)" stroke-width="1"/>
+  <path d="M 100 380 L 160 320 L 220 340 L 280 280 L 340 300 L 400 260" fill="none" stroke="url(#acc-dash)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+</svg>

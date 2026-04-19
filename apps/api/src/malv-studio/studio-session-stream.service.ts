@@ -2,6 +2,7 @@ import { forwardRef, Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { StudioRuntimeEvent, StudioRuntimeEventMapper } from "./studio-runtime-event.mapper";
 import { RuntimeEventBusService } from "../common/runtime-event-bus.service";
+import { MalvDistributedCoordinationService } from "../common/malv-distributed-coordination.service";
 
 type StudioSessionCorrelation = {
   sessionId: string;
@@ -17,14 +18,16 @@ export class StudioSessionStreamService implements OnModuleInit, OnModuleDestroy
   private readonly replayEvents = new Map<string, StudioRuntimeEvent[]>();
   private readonly replayBounds = { maxEvents: 120 };
   private unsubscribeRuntime: (() => void) | null = null;
+  private unsubscribeStudioDistributed: (() => Promise<void>) | null = null;
 
   constructor(
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
-    private readonly runtimeBus: RuntimeEventBusService
+    private readonly runtimeBus: RuntimeEventBusService,
+    private readonly distributed: MalvDistributedCoordinationService
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
     this.unsubscribeRuntime = this.runtimeBus.subscribe((raw) => {
       const sessionId = this.resolveSessionIdFromRaw(raw);
       if (!sessionId) return;
@@ -37,11 +40,22 @@ export class StudioSessionStreamService implements OnModuleInit, OnModuleDestroy
       });
       for (const event of mapped) this.emit(event);
     });
+    this.unsubscribeStudioDistributed = await this.distributed.subscribe("malv:studio:event_stream", (payload) => {
+      const event = payload.event as StudioRuntimeEvent | undefined;
+      if (!event || typeof event.sessionId !== "string") return;
+      this.pushReplay(event.sessionId, event);
+      this.realtime.emitToStudioSession(event.sessionId, "studio:runtime_event", {
+        ...event,
+        correlation: this.correlations.get(event.sessionId) ?? { sessionId: event.sessionId }
+      });
+    });
   }
 
   onModuleDestroy() {
     if (this.unsubscribeRuntime) this.unsubscribeRuntime();
+    void this.unsubscribeStudioDistributed?.();
     this.unsubscribeRuntime = null;
+    this.unsubscribeStudioDistributed = null;
   }
 
   correlate(args: StudioSessionCorrelation) {
@@ -61,14 +75,37 @@ export class StudioSessionStreamService implements OnModuleInit, OnModuleDestroy
   emit(event: StudioRuntimeEvent) {
     const correlation = this.correlations.get(event.sessionId) ?? { sessionId: event.sessionId };
     this.pushReplay(event.sessionId, event);
+    void this.distributed.appendStudioReplay(event.sessionId, event as unknown as Record<string, unknown>, this.replayBounds.maxEvents);
+    void this.distributed.publish("malv:studio:event_stream", { event });
     this.realtime.emitToStudioSession(event.sessionId, "studio:runtime_event", {
       ...event,
       correlation
     });
   }
 
-  replayForSession(sessionId: string) {
-    return [...(this.replayEvents.get(sessionId) ?? [])].sort((a, b) => a.at - b.at);
+  async replayForSession(sessionId: string) {
+    const local = [...(this.replayEvents.get(sessionId) ?? [])];
+    const distributedReplay = await this.distributed.readStudioReplay(sessionId);
+    const distributed = distributedReplay
+      .map((event) => event as StudioRuntimeEvent)
+      .filter((event) => event && event.sessionId === sessionId && typeof event.type === "string");
+    const merged = [...local, ...distributed];
+    merged.sort((a, b) => {
+      const atDelta = a.at - b.at;
+      if (atDelta !== 0) return atDelta;
+      const aKey = this.replayIdentityKey(a);
+      const bKey = this.replayIdentityKey(b);
+      return aKey.localeCompare(bKey);
+    });
+    const deduped: StudioRuntimeEvent[] = [];
+    const seen = new Set<string>();
+    for (const event of merged) {
+      const key = this.replayIdentityKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(event);
+    }
+    return deduped.slice(-this.replayBounds.maxEvents);
   }
 
   emitPreviewRefining(sessionId: string) {
@@ -126,6 +163,21 @@ export class StudioSessionStreamService implements OnModuleInit, OnModuleDestroy
       return;
     }
     this.replayEvents.set(sessionId, next);
+  }
+
+  private replayIdentityKey(event: StudioRuntimeEvent): string {
+    return `${event.sessionId}|${event.type}|${event.at}|${this.stableStringify(event.payload)}`;
+  }
+
+  private stableStringify(value: unknown): string {
+    if (value === null || value === undefined) return String(value);
+    if (typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.stableStringify(item)).join(",")}]`;
+    }
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${this.stableStringify(obj[key])}`).join(",")}}`;
   }
 }
 

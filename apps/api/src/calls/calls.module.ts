@@ -11,6 +11,7 @@ import { KillSwitchModule } from "../kill-switch/kill-switch.module";
 import { RealtimeModule } from "../realtime/realtime.module";
 import { CommonModule } from "../common/common.module";
 import { BeastModule } from "../beast/beast.module";
+import { InferenceModule } from "../inference/inference.module";
 import { MessageEntity } from "../db/entities/message.entity";
 import { WorkspaceTaskEntity } from "../db/entities/workspace-task.entity";
 import { WorkspaceModule } from "../workspace/workspace.module";
@@ -21,6 +22,7 @@ import { WorkspaceModule } from "../workspace/workspace.module";
     KillSwitchModule,
     forwardRef(() => CommonModule),
     forwardRef(() => BeastModule),
+    forwardRef(() => InferenceModule),
     forwardRef(() => WorkspaceModule),
     forwardRef(() => RealtimeModule)
   ],

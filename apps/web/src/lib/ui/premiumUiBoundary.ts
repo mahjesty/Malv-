@@ -14,7 +14,7 @@
  *   so system features can ship without flattening the UI into generic SaaS patterns.
  *
  * Protected surfaces (non-exhaustive):
- * - `AppShellPage`, `AppSidebar`, `TopBar`, `BottomNav`
+ * - `AppShellPage`, `AppSidebar`, `TopBar`
  * - `ChatHomePage` + chat presentation components
  * - `VideoCallPage` + call presence / motion layer
  * - `ModuleShell` (page chrome density)

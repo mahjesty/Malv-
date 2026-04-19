@@ -1,5 +1,11 @@
 import { Fragment, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import type { RichSurfaceStripTargets } from "@/lib/chat/malvRichResponsePresentation";
+import {
+  buildAssistantPresentationFenceSegments,
+  classifyStreamingAssistantLine,
+  type StreamingAssistantLine
+} from "@/lib/chat/assistant-text";
 
 async function copyToClipboard(text: string) {
   try {
@@ -61,102 +67,178 @@ function InlineText({ text }: { text: string }) {
   );
 }
 
-function ProseBlock({ block }: { block: string }) {
-  const lines = block.split("\n");
-  const listLines = lines.filter((l) => l.trim());
-  const isList = listLines.length > 0 && listLines.every((l) => /^[\s]*[-*]\s/.test(l));
+const FENCED_CODE_SHELL =
+  "my-2.5 overflow-hidden rounded-lg border border-white/[0.09] bg-black/35 backdrop-blur-sm sm:my-3 sm:rounded-xl";
+const FENCED_CODE_PRE =
+  "m-0 overflow-x-auto px-2.5 py-2.5 font-mono text-[11px] leading-relaxed text-malv-text/85 sm:px-3 sm:py-3 sm:text-[12px]";
 
-  if (isList) {
-    return (
-      <ul className="my-2.5 list-disc space-y-1 pl-4 first:mt-0 sm:my-3 sm:space-y-1.5 sm:pl-5">
-        {listLines.map((l, i) => (
-          <li key={i} className="text-[14px] leading-6 text-malv-text/[0.93] sm:text-[15px] sm:leading-7">
-            <InlineText text={l.replace(/^[\s]*[-*]\s/, "")} />
-          </li>
-        ))}
-      </ul>
-    );
+/** Shared fenced ``` block: optional info line language + copy (streaming and final). */
+function MalvAssistantFencedCodeBlock({ inner }: { inner: string }) {
+  const [copied, setCopied] = useState(false);
+  const normalized = inner.replace(/^\n/, "");
+  const lines = normalized.split("\n");
+  const maybeLang = lines[0]?.trim();
+  const hasLang = Boolean(maybeLang && /^[\w-]+$/.test(maybeLang) && lines.length > 1);
+  const code = hasLang ? lines.slice(1).join("\n") : normalized;
+
+  async function onCopy() {
+    await copyToClipboard(code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1100);
   }
 
   return (
-    <p className="my-2.5 text-[14px] leading-6 text-malv-text/[0.93] first:mt-0 sm:my-3 sm:text-[15px] sm:leading-7 sm:text-malv-text/[0.94]">
-      <InlineText text={block} />
-    </p>
+    <div className={FENCED_CODE_SHELL}>
+      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-2.5 py-1.5 sm:gap-3 sm:px-3 sm:py-2">
+        <div className="min-w-0">
+          {hasLang ? (
+            <div className="truncate text-[10px] font-mono uppercase tracking-wider text-malv-text/45">{maybeLang}</div>
+          ) : (
+            <div className="text-[10px] font-mono uppercase tracking-wider text-malv-text/35">Code</div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => void onCopy()}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] font-semibold text-malv-text/75 transition-colors hover:bg-white/[0.06]"
+          aria-label={copied ? "Copied" : "Copy code"}
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-malv-text/90" /> : <Copy className="h-3.5 w-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <pre className={FENCED_CODE_PRE}>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+/** Shared outer shell so streaming → formatted completion does not jump horizontal bounds or type scale. */
+const MESSAGE_BODY_SHELL_CLASS =
+  "w-full max-w-[min(100%,760px)] text-[14px] leading-6 text-malv-text/[0.93] sm:text-[15px] sm:leading-7";
+
+function renderStreamingAssistantLine(row: StreamingAssistantLine, lineKey: string, lineIdx: number) {
+  if (row.kind === "heading") {
+    if (!row.title) {
+      return <div key={lineKey} className="h-1 shrink-0" aria-hidden />;
+    }
+    const sizeClass =
+      row.level <= 1 ? "text-[15px] sm:text-[16px]" : row.level === 2 ? "text-[15px] sm:text-[15px]" : "text-[14px]";
+    return (
+      <div
+        key={lineKey}
+        className={`font-semibold tracking-tight text-malv-text ${sizeClass} ${lineIdx > 0 ? "pt-1" : ""}`}
+      >
+        <InlineText text={row.title} />
+      </div>
+    );
+  }
+
+  if (row.kind === "list_item") {
+    return (
+      <div key={lineKey} className="flex gap-2 pl-0.5 text-malv-text/[0.93] sm:pl-1">
+        <span className="mt-0.5 shrink-0 select-none text-malv-text/45" aria-hidden>
+          •
+        </span>
+        <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+          <InlineText text={row.text} />
+        </div>
+      </div>
+    );
+  }
+
+  if (row.kind === "ordered_item") {
+    return (
+      <div key={lineKey} className="flex gap-2 pl-0.5 text-malv-text/[0.93] sm:pl-1">
+        <span className="w-5 shrink-0 text-right tabular-nums text-[13px] text-malv-text/50 sm:w-6 sm:text-[14px]">
+          {row.index}.
+        </span>
+        <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+          <InlineText text={row.text} />
+        </div>
+      </div>
+    );
+  }
+
+  if (row.kind === "divider") {
+    return <div key={lineKey} className="my-2 border-t border-white/[0.08]" aria-hidden />;
+  }
+
+  if (!row.text.length) {
+    return null;
+  }
+
+  return (
+    <div key={lineKey} className="whitespace-pre-wrap break-words text-malv-text/[0.93]">
+      <InlineText text={row.text} />
+    </div>
+  );
+}
+
+function renderStructuredAssistantProseSegment(segText: string, segIdx: number) {
+  const lines = segText.split("\n");
+  return (
+    <Fragment key={`p-${segIdx}`}>
+      {lines.map((line, lineIdx) => {
+        const row = classifyStreamingAssistantLine(line);
+        const lineKey = `p-${segIdx}-l-${lineIdx}`;
+        if (row.kind === "plain" && !row.text.length) {
+          return lineIdx < lines.length - 1 ? (
+            <div key={lineKey} className="h-1 shrink-0" aria-hidden />
+          ) : null;
+        }
+        return renderStreamingAssistantLine(row, lineKey, lineIdx);
+      })}
+    </Fragment>
   );
 }
 
 /**
- * Lightweight markdown-style rendering for MALV replies (paragraphs, lists, fenced + inline code).
- * No external markdown dependency — safe for streaming partial content.
+ * @deprecated Prefer {@link MalvMessageBody} with `streaming` — kept for call sites/tests.
  */
-export function MalvMessageBody({ content, emptyHint }: { content: string; emptyHint?: string }) {
-  if (!content.trim()) {
-    return <span className="text-[13px] italic text-malv-text/55 sm:text-sm">{emptyHint ?? "…"}</span>;
-  }
+export function MalvStreamingPlainBody({ content }: { content: string }) {
+  return <MalvMessageBody content={content} streaming emptyHint="…" />;
+}
 
-  const segments = content.split("```");
-  const [copiedBlockKey, setCopiedBlockKey] = useState<string | null>(null);
+/**
+ * Lightweight markdown-style rendering for MALV replies (paragraphs, lists, fenced + inline code).
+ * No external markdown dependency.
+ *
+ * Rendering uses {@link buildAssistantPresentationFenceSegments} so live + settled share one normalization
+ * and structure path (rich strip only when settled with targets).
+ */
+export function MalvMessageBody({
+  content,
+  emptyHint: _emptyHint,
+  streaming,
+  richSurfaceStrip
+}: {
+  content: string;
+  emptyHint?: string;
+  /** Live stream vs settled row — drives presentation phase (strip + structural parity). */
+  streaming?: boolean;
+  /** When set (structured capability surface), duplicate URLs are stripped from visible prose. */
+  richSurfaceStrip?: RichSurfaceStripTargets | null;
+}) {
+  if (!content.length) return null;
 
-  async function onCopyBlock(key: string, code: string) {
-    await copyToClipboard(code);
-    setCopiedBlockKey(key);
-    // Premium-feeling: short feedback, then revert.
-    window.setTimeout(() => {
-      setCopiedBlockKey((prev) => (prev === key ? null : prev));
-    }, 1100);
-  }
+  const fenceSegs = buildAssistantPresentationFenceSegments(content, {
+    phase: streaming ? "live" : "settled",
+    richSurfaceStrip: richSurfaceStrip ?? undefined
+  });
 
   return (
-    <div className="w-full max-w-[min(100%,760px)] text-[14px] leading-6 text-malv-text/[0.93] sm:text-[15px] sm:leading-7">
-      {segments.map((seg, i) => {
-        if (i % 2 === 1) {
-          const lines = seg.replace(/^\n/, "").split("\n");
-          const maybeLang = lines[0]?.trim();
-          const hasLang = maybeLang && /^[\w-]+$/.test(maybeLang) && lines.length > 1;
-          const code = hasLang ? lines.slice(1).join("\n") : seg.replace(/^\n/, "");
-          const key = `${i}-${hasLang ? maybeLang : "code"}`;
-          const copied = copiedBlockKey === key;
-          return (
-            <div
-              key={i}
-              className="my-2.5 overflow-hidden rounded-lg border border-white/[0.09] bg-black/35 backdrop-blur-sm sm:my-3 sm:rounded-xl"
-            >
-              <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-2.5 py-1.5 sm:gap-3 sm:px-3 sm:py-2">
-                <div className="min-w-0">
-                  {hasLang ? (
-                    <div className="truncate text-[10px] font-mono uppercase tracking-wider text-malv-text/45">
-                      {maybeLang}
-                    </div>
-                  ) : (
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-malv-text/35">Code</div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void onCopyBlock(key, code)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] font-semibold text-malv-text/75 transition-colors hover:bg-white/[0.06]"
-                  aria-label={copied ? "Copied" : "Copy code"}
-                >
-                  {copied ? <Check className="h-3.5 w-3.5 text-malv-text/90" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span>{copied ? "Copied" : "Copy"}</span>
-                </button>
-              </div>
-              <pre className="m-0 overflow-x-auto px-2.5 py-2.5 font-mono text-[11px] leading-relaxed text-malv-text/85 sm:px-3 sm:py-3 sm:text-[12px]">
-                <code>{code}</code>
-              </pre>
-            </div>
-          );
-        }
-
-        const blocks = seg.split(/\n\n+/);
-        return (
-          <Fragment key={i}>
-            {blocks.map((b, j) => (
-              <ProseBlock key={`${i}-${j}`} block={b} />
-            ))}
-          </Fragment>
-        );
-      })}
+    <div className={MESSAGE_BODY_SHELL_CLASS}>
+      <div className="space-y-1">
+        {fenceSegs.map((seg, segIdx) =>
+          seg.kind === "code" ? (
+            <MalvAssistantFencedCodeBlock key={`c-${segIdx}`} inner={seg.text} />
+          ) : (
+            renderStructuredAssistantProseSegment(seg.text, segIdx)
+          )
+        )}
+      </div>
     </div>
   );
 }

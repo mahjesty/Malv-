@@ -9,7 +9,17 @@ export type WorkspaceActivityType =
   | "approval_created"
   | "approval_decided"
   | "call_recap_ready"
-  | "collaboration_summary_ready";
+  | "collaboration_summary_ready"
+  | "task_reminder_delivered"
+  | "task_execution_approval_required"
+  | "task_execution_surfaced"
+  | "task_execution_blocked"
+  | "task_execution_failed"
+  | "malv_bridge_capability_resolved"
+  | "malv_external_dispatch_attempted"
+  | "malv_external_dispatch_ack"
+  | "malv_notification_delivery"
+  | "malv_continuity_persisted";
 
 @Entity({ name: "workspace_activity_events" })
 export class WorkspaceActivityEventEntity {

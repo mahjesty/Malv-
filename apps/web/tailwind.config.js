@@ -1,4 +1,3 @@
-import forms from "@tailwindcss/forms";
 import defaultTheme from "tailwindcss/defaultTheme";
 
 /** @type {import('tailwindcss').Config} */
@@ -53,6 +52,11 @@ export default {
           border: "rgb(var(--malv-border-rgb) / <alpha-value>)"
         },
 
+        /** MALV foundation layer — see `src/styles/malv.css` */
+        "malv-f-gold": "rgb(var(--malv-f-gold-rgb) / <alpha-value>)",
+        "malv-f-live": "rgb(var(--malv-f-live-rgb) / <alpha-value>)",
+        "malv-f-ring-live": "rgb(var(--malv-f-ring-live-rgb) / <alpha-value>)",
+
         surface: {
           void: "rgb(var(--malv-surface-void-rgb) / <alpha-value>)",
           base: "rgb(var(--malv-surface-base-rgb) / <alpha-value>)",
@@ -62,13 +66,14 @@ export default {
       },
       backgroundImage: {
         "malv-grid": `linear-gradient(rgba(255,255,255,0.042) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.042) 1px, transparent 1px)`,
-        "malv-radial": `radial-gradient(ellipse 120% 80% at 50% -28%, rgb(96 165 250 / 0.1), transparent 55%), radial-gradient(ellipse 90% 70% at 100% 0%, rgb(167 139 250 / 0.08), transparent 50%)`
+        "malv-radial": `radial-gradient(ellipse 120% 80% at 50% -28%, rgb(var(--malv-f-live-rgb) / 0.09), transparent 55%), radial-gradient(ellipse 90% 70% at 100% 0%, rgb(var(--malv-f-gold-rgb) / 0.07), transparent 50%)`
       },
       boxShadow: {
         panel: "0 18px 48px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)",
         "panel-deep": "0 24px 64px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.06)",
-        glow: "0 0 44px rgba(96, 165, 250, 0.24)",
-        "glow-sm": "0 0 28px rgba(96, 165, 250, 0.18)",
+        /* Live accent glow — soft teal (MALV interaction), not neon blue */
+        glow: "0 0 44px rgb(var(--malv-f-live-rgb) / 0.22)",
+        "glow-sm": "0 0 28px rgb(var(--malv-f-live-rgb) / 0.16)",
         lift: "0 14px 36px rgba(0,0,0,0.22), 0 0 0 1px rgba(255,255,255,0.06)"
       },
       keyframes: {
@@ -81,6 +86,5 @@ export default {
         "pulse-soft": "pulse-soft 1.75s ease-in-out infinite"
       }
     }
-  },
-  plugins: [forms]
+  }
 };

@@ -1,0 +1,23 @@
+{
+  "reflex_simple": [
+    "hey",
+    "what's up",
+    "how are you doing"
+  ],
+  "normal_chat": [
+    "Summarize how to prepare for a production deployment in five bullets.",
+    "Give me a short plan for cleaning up tech debt without halting feature work."
+  ],
+  "deep_reasoning": [
+    "Design a phased migration strategy for a NestJS monolith to service-oriented modules with rollback safeguards.",
+    "Evaluate tradeoffs between strict schema-first contracts and rapid iteration for an AI execution platform."
+  ],
+  "ambiguous_clarification": [
+    "Make it better.",
+    "Fix the thing but keep it the same."
+  ],
+  "phased_engineering": [
+    "Build a full production validation harness for an AI orchestration backend with rollout gates, observability, and failover test plans.",
+    "Create a staged launch blueprint for a multi-transport chat system with deep reasoning controls and safety-preserving telemetry."
+  ]
+}

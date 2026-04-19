@@ -4,8 +4,7 @@
 import { Route, Routes, useLocation, Navigate } from "react-router-dom";
 import { useMalvNewChatShortcut } from "../../lib/chat/useMalvNewChatShortcut";
 import { TopBar } from "../../components/navigation/TopBar";
-import { BottomNav } from "../../components/navigation/BottomNav";
-import { AppSidebar } from "../../components/navigation/AppSidebar";
+import AppSidebar from "../../components/navigation/AppSidebar";
 import { ChatHomePage } from "./ChatHomePage";
 import { DashboardPage } from "./DashboardPage";
 import { ConversationsPage } from "./ConversationsPage";
@@ -27,33 +26,23 @@ import { SettingsPage } from "./SettingsPage";
 import { MalvStudioPage } from "./MalvStudioPage";
 import { TasksPage } from "./TasksPage";
 import { InboxPage } from "./InboxPage";
-import { ExplorePage } from "./ExplorePage";
+import { ExploreLayout } from "./explore/ExploreLayout";
+import { ExploreHubPage } from "./explore/ExploreHubPage";
+import { ExploreCapabilityPage } from "./explore/ExploreCapabilityPage";
+import { ExploreSourceIntakePage } from "./explore/ExploreSourceIntakePage";
+import { ExploreUnitLegacyRedirect } from "./explore/ExploreUnitLegacyRedirect";
+import { ExploreImageSessionPage } from "./explore/ExploreImageSessionPage";
 import { AdminControlPage } from "./AdminControlPage";
 import AdminLayout from "./AdminLayout";
 import { SelfUpgradeListPage } from "./SelfUpgradeListPage";
 import { SelfUpgradeDetailPage } from "./SelfUpgradeDetailPage";
 import { AdminGate } from "./AdminGate";
 import { useAuth } from "../../lib/auth/AuthContext";
-import { type ReactNode } from "react";
 import { MalvAppShellProvider } from "../../lib/context/MalvAppShellContext";
 import { MalvChatComposerSettingsProvider } from "../../lib/settings/MalvChatComposerSettingsContext";
 import { VoiceCallShellProvider } from "../../lib/voice/VoiceCallShellContext";
 import { VoiceCallGlobalLayer } from "../../components/call/VoiceCallGlobalLayer";
 import { RuntimeDrawerHost } from "../../components/chat/RuntimeDrawerHost";
-
-function Icon(props: { children: ReactNode }) {
-  return <span className="opacity-95">{props.children}</span>;
-}
-
-function SmallSvgIcon(pathD: string) {
-  return (
-    <Icon>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d={pathD} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    </Icon>
-  );
-}
 
 type Activity = "live" | "processing" | "idle";
 
@@ -86,7 +75,7 @@ function matchRouteMeta(pathname: string): { title: string; subtitle?: string; a
     {
       test: (p) => p.startsWith("/app/explore"),
       title: "Explore",
-      subtitle: "Templates and prebuilt actions to start fast.",
+      subtitle: "Discover, launch, and continue workflows.",
       activity: "idle"
     },
     {
@@ -172,6 +161,7 @@ export default function AppShellPage() {
   const showAdmin = role === "admin";
   const meta = matchRouteMeta(location.pathname);
   const immersive = isImmersiveApp(location.pathname);
+  const exploreChrome = location.pathname.startsWith("/app/explore");
   useMalvNewChatShortcut();
 
   if (isAppHome(location.pathname)) {
@@ -182,110 +172,111 @@ export default function AppShellPage() {
     );
   }
 
-  const bottomItems = [
-    {
-      to: "/app/chat",
-      label: "Chat",
-      end: true,
-      icon: SmallSvgIcon("M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z")
-    },
-    {
-      to: "/app/tasks",
-      label: "Tasks",
-      icon: SmallSvgIcon("M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11")
-    },
-    {
-      to: "/app/inbox",
-      label: "Inbox",
-      icon: SmallSvgIcon("M22 12h-6l-2 3h-8l-2-3H2M2 3h20v18H2V3z")
-    },
-    {
-      to: "/app/explore",
-      label: "Explore",
-      icon: SmallSvgIcon("M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83")
-    },
-    { to: "/app/studio", label: "Studio", icon: SmallSvgIcon("M12 2l3 7h7l-5.5 4 2 7L12 17l-6.5 3 2-7L2 9h7l3-7z") }
-  ];
-
   return (
     <MalvAppShellProvider>
       <MalvChatComposerSettingsProvider>
         <VoiceCallShellProvider>
-      <div
-        className={[
-          "dark flex text-malv-text antialiased",
-          immersive
-            ? "h-[100dvh] overflow-hidden overscroll-none malv-operator malv-operator-chat-bg"
-            : "min-h-screen bg-malv-canvas bg-malv-radial"
-        ].join(" ")}
-      >
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <AppSidebar showAdmin={showAdmin} />
+          {/*
+            Outer shell is ALWAYS viewport-locked.
+            h-[100dvh] + overflow-hidden prevent the container from growing with content.
+            Only immersive-specific atmosphere classes are conditional.
+          */}
+          <div
+            className={[
+              "flex h-[100dvh] overflow-hidden text-malv-text antialiased",
+              immersive ? "overscroll-none malv-operator malv-operator-chat-bg" : ""
+            ].filter(Boolean).join(" ")}
+            style={{ background: "rgb(var(--malv-canvas-rgb))", transition: "background-color 220ms ease" }}
+          >
+            {/* Sidebar + content pane: a bounded flex row filling the viewport */}
+            <div className="flex h-full min-w-0 flex-1">
+              <AppSidebar showAdmin={showAdmin} />
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {!immersive ? <TopBar title={meta.title} subtitle={meta.subtitle} activity={meta.activity} /> : null}
+              {/* Main column: TopBar (shrink-0) + scrolling content pane (flex-1) */}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {!immersive ? (
+                  <TopBar
+                    title={meta.title}
+                    subtitle={meta.subtitle}
+                    activity={meta.activity}
+                    dense={exploreChrome}
+                    edgeless={exploreChrome}
+                  />
+                ) : null}
 
-            <main
-              className={[
-                "min-h-0 min-w-0 flex-1",
-                immersive
-                  ? "flex flex-col overflow-hidden overscroll-none pb-4 pt-0 lg:pb-6"
-                  : "min-h-[50dvh] pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-10"
-              ].join(" ")}
-            >
-              <Routes>
-                <Route index element={<DashboardPage />} />
-                <Route path="chat" element={<ChatHomePage />} />
-                <Route path="conversations" element={<ConversationsPage />} />
-                <Route path="conversations/:id" element={<ConversationDetailPage />} />
-                <Route path="video" element={<VideoCallPage />} />
-                <Route path="voice" element={<VoiceCallPage />} />
-
-                <Route path="memory" element={<MemoryCenterPage />} />
-                <Route path="vault" element={<VaultCenterPage />} />
-
-                <Route path="files" element={<FilesUploadsPage />} />
-                <Route path="devices" element={<DeviceCenterPage />} />
-                <Route path="collaboration" element={<CollaborationCenterPage />} />
-                <Route path="workspace" element={<WorkspacePage />} />
-                <Route path="tasks" element={<TasksPage />} />
-                <Route path="inbox" element={<InboxPage />} />
-                <Route path="explore" element={<ExplorePage />} />
-                <Route path="studio" element={<MalvStudioPage />} />
-
-                <Route path="beast" element={<BeastCenterPage />} />
-
-                <Route path="notifications" element={<NotificationsPage />} />
-
-                <Route path="support" element={<SupportCenterPage />} />
-                <Route path="tickets" element={<TicketListPage />} />
-                <Route path="tickets/:id" element={<TicketDetailPage />} />
-
-                <Route path="settings" element={<SettingsPage />} />
-
-                <Route
-                  path="admin"
-                  element={
-                    <AdminGate>
-                      <AdminLayout />
-                    </AdminGate>
-                  }
+                {/*
+                  <main> is the sole scroll owner for non-immersive pages.
+                  overflow-y-auto here means content scrolls; the sidebar never moves.
+                  Immersive routes (chat/video/voice) manage their own internal scroll.
+                */}
+                <main
+                  className={[
+                    "min-h-0 min-w-0 flex-1",
+                    immersive
+                      ? "flex flex-col overflow-hidden overscroll-none pb-4 pt-0 lg:pb-6"
+                      : "overflow-y-auto pb-10"
+                  ].join(" ")}
+                  style={immersive ? undefined : { WebkitOverflowScrolling: "touch" }}
                 >
-                  <Route index element={<AdminControlPage />} />
-                  <Route path="self-upgrade" element={<SelfUpgradeListPage />} />
-                  <Route path="self-upgrade/:id" element={<SelfUpgradeDetailPage />} />
-                </Route>
+                  <Routes>
+                    <Route index element={<DashboardPage />} />
+                    <Route path="chat" element={<ChatHomePage />} />
+                    <Route path="conversations" element={<ConversationsPage />} />
+                    <Route path="conversations/:id" element={<ConversationDetailPage />} />
+                    <Route path="video" element={<VideoCallPage />} />
+                    <Route path="voice" element={<VoiceCallPage />} />
 
-                <Route path="*" element={<Navigate to="/app" replace />} />
-              </Routes>
-            </main>
+                    <Route path="memory" element={<MemoryCenterPage />} />
+                    <Route path="vault" element={<VaultCenterPage />} />
+
+                    <Route path="files" element={<FilesUploadsPage />} />
+                    <Route path="devices" element={<DeviceCenterPage />} />
+                    <Route path="collaboration" element={<CollaborationCenterPage />} />
+                    <Route path="workspace" element={<WorkspacePage />} />
+                    <Route path="tasks" element={<TasksPage />} />
+                    <Route path="inbox" element={<InboxPage />} />
+                    <Route path="explore" element={<ExploreLayout />}>
+                      <Route index element={<ExploreHubPage />} />
+                      <Route path="import" element={<ExploreSourceIntakePage />} />
+                      <Route path="unit/:unitId" element={<ExploreUnitLegacyRedirect />} />
+                      <Route path="create/image/session" element={<ExploreImageSessionPage />} />
+                      <Route path=":categoryId/:capabilityId" element={<ExploreCapabilityPage />} />
+                      <Route path="*" element={<Navigate to="/app/explore" replace />} />
+                    </Route>
+                    <Route path="studio" element={<MalvStudioPage />} />
+
+                    <Route path="beast" element={<BeastCenterPage />} />
+
+                    <Route path="notifications" element={<NotificationsPage />} />
+
+                    <Route path="support" element={<SupportCenterPage />} />
+                    <Route path="tickets" element={<TicketListPage />} />
+                    <Route path="tickets/:id" element={<TicketDetailPage />} />
+
+                    <Route path="settings" element={<SettingsPage />} />
+
+                    <Route
+                      path="admin"
+                      element={
+                        <AdminGate>
+                          <AdminLayout />
+                        </AdminGate>
+                      }
+                    >
+                      <Route index element={<AdminControlPage />} />
+                      <Route path="self-upgrade" element={<SelfUpgradeListPage />} />
+                      <Route path="self-upgrade/:id" element={<SelfUpgradeDetailPage />} />
+                    </Route>
+
+                    <Route path="*" element={<Navigate to="/app" replace />} />
+                  </Routes>
+                </main>
+              </div>
+            </div>
+
+            <VoiceCallGlobalLayer />
+            <RuntimeDrawerHost />
           </div>
-        </div>
-
-        {!immersive ? <BottomNav items={bottomItems} /> : null}
-        <VoiceCallGlobalLayer />
-        <RuntimeDrawerHost />
-      </div>
         </VoiceCallShellProvider>
       </MalvChatComposerSettingsProvider>
     </MalvAppShellProvider>

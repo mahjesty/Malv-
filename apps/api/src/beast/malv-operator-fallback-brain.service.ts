@@ -1,12 +1,10 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { BeastInferenceResponse } from "./client/beast-worker.client";
-
-const EMERGENCY_LINE =
-  "MALV fallback brain is active. Private inference did not return usable text; the control plane is still up and listening.";
+import { MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE } from "./malv-chat-agent-unavailable.constants";
 
 /**
- * API-local MALV operator when beast-worker is unreachable, errors, or returns empty output.
- * Always returns non-empty, structured, context-aware text.
+ * API-local reply when beast-worker is unreachable, errors, returns empty output, or phased steps fail.
+ * User text is a single professional notice; diagnostics are logged only.
  */
 @Injectable()
 export class MalvOperatorFallbackBrainService {
@@ -15,52 +13,24 @@ export class MalvOperatorFallbackBrainService {
   synthesize(args: {
     userMessage: string;
     classifiedMode: "light" | "beast";
+    /** Internal-only: transport, HTTP, provider, timeout, model-unavailable, etc. Never echoed to chat. */
     workerError?: string;
+    correlationId?: string;
   }): BeastInferenceResponse {
-    const trimmed = args.userMessage.trim();
-    const topic = trimmed.slice(0, 400) || "(empty message)";
-    const topicDisplay = topic.length > 280 ? topic.slice(0, 280) + "…" : topic;
-
-    const workerNote = args.workerError
-      ? `Transport / worker: ${args.workerError.replace(/\s+/g, " ").slice(0, 240)}`
-      : "The worker response had no usable body for this turn.";
-
-    const reply = [
-      "### MALV operator (fallback path)",
-      "",
-      "Status: control plane online; model output missing or unreachable. This reply is generated on the API so your thread does not go silent.",
-      "",
-      "### What you sent",
-      topicDisplay,
-      "",
-      "### Diagnosis",
-      workerNote,
-      "",
-      "### Routing",
-      `Classified mode for this turn: ${args.classifiedMode}.`,
-      "",
-      "### Bring private inference online",
-      "1. Run the worker: from repo root `npm run dev -w @malv/beast-worker` (default port 9090).",
-      "2. Point the API at it: `BEAST_WORKER_BASE_URL` (e.g. http://127.0.0.1:9090).",
-      "3. Bind weights: set `MALV_MODEL_PATH` in `.env` to local weights or a Hugging Face model id, then restart the worker.",
-      "4. If `BEAST_WORKER_API_KEY` is set, use the same key on API and worker.",
-      "",
-      "When the worker answers successfully, this same conversation id and client keep working unchanged.",
-      "",
-      "— MALV"
-    ].join("\n");
-
-    const safeReply = reply.trim().length > 0 ? reply : EMERGENCY_LINE;
-
-    this.logger.log(`[MALV BRAIN] fallback invoked classifiedMode=${args.classifiedMode} replyLen=${safeReply.length}`);
+    const internal = (args.workerError ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
+    const correlation = args.correlationId ?? "none";
+    this.logger.warn(
+      `[MALV BRAIN] operator fallback user-notice correlationId=${correlation} classifiedMode=${args.classifiedMode} userMessageLen=${args.userMessage.length}` +
+        (internal ? ` internalSummary=${internal}` : "")
+    );
 
     return {
-      reply: safeReply,
+      reply: MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE,
       meta: {
         malvReplySource: "api_operator_fallback_brain",
-        malvBrainDirectiveVersion: "2",
+        malvBrainDirectiveVersion: "3",
         classifiedMode: args.classifiedMode,
-        workerError: args.workerError ?? null
+        malvAgentUnavailableNotice: true
       }
     };
   }

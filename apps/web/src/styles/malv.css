@@ -1,0 +1,87 @@
+/**
+ * MALV UI foundation — premium dark surfaces, muted gold authority, calm live accent.
+ * Imported from `main.tsx` after `index.css` (uses --malv-* rgb tokens from index.css).
+ */
+
+:root {
+  /* Muted antique gold — not yellow, not neon */
+  --malv-f-gold-rgb: 176 141 87;
+  /* Soft intelligent teal — hover, focus, live state */
+  --malv-f-live-rgb: 92 165 186;
+  /* Dedicated foundation surfaces (slightly lifted from app canvas) */
+  --malv-f-surface-rgb: 22 22 24;
+  --malv-f-surface-hi-rgb: 28 28 31;
+  --malv-f-ring-live-rgb: 92 165 186;
+
+  /*
+   * ── MALV semantic color system (single product identity) ──
+   * Gold = authority / premium emphasis. Live = interaction / focus / intelligence.
+   * Aliases reference shared rgb triplets from `index.css` where applicable.
+   */
+  --malv-color-bg-app: rgb(var(--malv-canvas-rgb));
+  --malv-color-bg-elevated: rgb(var(--malv-card-rgb));
+  --malv-color-bg-panel: rgb(var(--malv-surface-overlay-rgb));
+  --malv-color-bg-muted: rgb(var(--malv-surface-raised-rgb));
+  --malv-color-bg-base: rgb(var(--malv-surface-base-rgb));
+
+  --malv-color-text-primary: rgb(var(--malv-text-rgb));
+  --malv-color-text-secondary: rgb(var(--malv-muted-rgb) / 0.88);
+  --malv-color-text-muted: rgb(var(--malv-muted-rgb) / 0.72);
+  --malv-color-text-placeholder: rgb(var(--malv-muted-rgb) / 0.78);
+
+  --malv-color-border-subtle: rgb(var(--malv-border-rgb) / 0.085);
+  --malv-color-border-strong: rgb(var(--malv-border-rgb) / 0.15);
+  --malv-color-border-focus: rgb(var(--malv-f-ring-live-rgb) / 0.42);
+
+  --malv-color-gold: rgb(var(--malv-f-gold-rgb));
+  --malv-color-gold-soft: rgb(var(--malv-f-gold-rgb) / 0.14);
+  --malv-color-gold-muted: rgb(var(--malv-f-gold-rgb) / 0.22);
+  --malv-color-gold-deep: rgb(var(--malv-f-gold-rgb) / 0.92);
+  --malv-color-gold-ring: rgb(var(--malv-f-gold-rgb) / 0.38);
+  --malv-color-gold-glow: rgb(var(--malv-f-gold-rgb) / 0.16);
+
+  --malv-color-live: rgb(var(--malv-f-live-rgb));
+  --malv-color-live-soft: rgb(var(--malv-f-live-rgb) / 0.12);
+  --malv-color-live-muted: rgb(var(--malv-f-live-rgb) / 0.2);
+  --malv-color-live-deep: rgb(var(--malv-f-live-rgb) / 0.55);
+  --malv-color-live-ring: rgb(var(--malv-f-ring-live-rgb) / 0.45);
+  --malv-color-live-glow: rgb(var(--malv-f-live-rgb) / 0.2);
+
+  --malv-state-hover: rgb(var(--malv-border-rgb) / 0.055);
+  --malv-state-hover-strong: rgb(var(--malv-border-rgb) / 0.08);
+  --malv-state-active: rgb(var(--malv-border-rgb) / 0.1);
+  --malv-state-focus-ring: rgb(var(--malv-f-ring-live-rgb) / 0.48);
+  --malv-state-focus-glow: rgb(var(--malv-f-live-rgb) / 0.14);
+  --malv-state-selected-bg: rgb(var(--malv-f-gold-rgb) / 0.11);
+  --malv-state-selected-border: rgb(var(--malv-f-gold-rgb) / 0.26);
+  --malv-state-selected-glow: rgb(var(--malv-f-gold-rgb) / 0.12);
+
+  /* Motion — align with index --malv-theme-transition where possible */
+  --malv-sys-transition-fast: 160ms ease;
+  --malv-sys-transition: 200ms ease;
+  --malv-sys-transition-slow: 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html:not(.dark) {
+  --malv-f-surface-rgb: 255 255 255;
+  --malv-f-surface-hi-rgb: 252 251 249;
+  --malv-f-gold-rgb: 154 124 76;
+  --malv-f-live-rgb: 58 130 148;
+  --malv-f-ring-live-rgb: 58 130 148;
+
+  --malv-color-border-subtle: rgb(var(--malv-border-rgb) / 0.09);
+  --malv-color-border-strong: rgb(var(--malv-border-rgb) / 0.16);
+  --malv-color-border-focus: rgb(var(--malv-f-ring-live-rgb) / 0.4);
+  --malv-color-text-placeholder: rgb(var(--malv-muted-rgb) / 0.56);
+  --malv-state-hover: rgb(var(--malv-border-rgb) / 0.05);
+  --malv-state-hover-strong: rgb(var(--malv-border-rgb) / 0.07);
+  --malv-state-active: rgb(var(--malv-border-rgb) / 0.09);
+  --malv-state-selected-bg: rgb(var(--malv-f-gold-rgb) / 0.1);
+  --malv-state-selected-border: rgb(var(--malv-f-gold-rgb) / 0.24);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .malv-f-motion {
+    transition: none !important;
+  }
+}

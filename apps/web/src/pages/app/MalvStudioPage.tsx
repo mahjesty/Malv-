@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -28,11 +28,15 @@ import {
   compareStudioVersions,
   captureStudioTarget,
   createStudioSession,
+  fetchBuildUnit,
   fetchConversationDetail,
+  fetchUnitComposition,
   fetchStudioVersions,
+  improveBuildUnit,
   revertStudioChanges,
   restoreStudioVersion,
   sendStudioInstruction,
+  type ApiBuildUnit,
   type StudioSession
 } from "../../lib/api/dataPlane";
 import { buildStudioHandoffComposerText } from "../../lib/conversationExport";
@@ -52,6 +56,39 @@ import {
   studioResultHeadline,
   studioResultSummaryLines
 } from "../../lib/studio/studioProductTruth";
+import {
+  exploreImproveIntentHeadline,
+  inheritExplorePreviewReviewForImprovedUnit,
+  exploreReviewPostureSecondaryLine,
+  exploreReviewPostureSecondaryLineFromLayout,
+  readExplorePreviewActionContext,
+  readExplorePreviewReview,
+  setExploreStudioReturn
+} from "../../lib/explore/explorePreviewReviewStorage";
+import {
+  parseStudioExploreSeed,
+  persistStudioExploreSeedContext,
+  studioExploreSeedToComposerPrompt
+} from "../../lib/explore/studioExploreSeed";
+import {
+  exploreHandoffCalmStudioComposerLead,
+  exploreHandoffStudioBannerCopy
+} from "../../lib/explore/exploreActionHandoff";
+import { consumeExploreStudioUnitHandoff } from "../../lib/explore/exploreStudioHandoffStorage";
+import {
+  deriveStudioImproveFraming,
+  improveOutcomeShortLabel,
+  mapImproveIntentToApiIntent,
+  parseStudioImproveSeed,
+  persistStudioImproveSeedContext,
+  readPersistedStudioImproveSeed,
+  mergeComposerWithImproveSupplementIfEmpty,
+  studioImprovePostureCaption,
+  studioImprovePreviewFeasibilityNote,
+  studioImprovePrimaryLine,
+  studioImproveSeedComposerSupplement,
+  type ImproveContextPayload
+} from "../../lib/explore/improveContext";
 
 type DeviceMode = "desktop" | "tablet" | "mobile";
 type LayoutMode = "chat_preview" | "chat_inspect" | "full_preview" | "focused_chat";
@@ -86,6 +123,7 @@ function toPreviewTargetFromBridge(target: BridgeSemanticTarget): PreviewTarget 
 
 export function MalvStudioPage() {
   const { accessToken } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [session, setSession] = useState<StudioSession | null>(null);
   const [versions, setVersions] = useState<Array<Record<string, unknown>>>([]);
@@ -121,6 +159,23 @@ export function MalvStudioPage() {
   const [previewSuccessNote, setPreviewSuccessNote] = useState("");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [liveState, setLiveState] = useState<"live" | "reconnecting" | "offline">("offline");
+  /** Build Unit loaded from ?unitId= — provides execution context to Studio. */
+  const [unitContext, setUnitContext] = useState<ApiBuildUnit | null>(null);
+  /** Set when ?fromSurface=explore_preview — shows live-preview handoff in the unit banner. */
+  const [exploreLivePreviewHandoff, setExploreLivePreviewHandoff] = useState<string | null>(null);
+  /** Intent + posture lines when opening Studio from Explore live preview (session action context). */
+  const [exploreLivePreviewFraming, setExploreLivePreviewFraming] = useState<{
+    primary: string;
+    secondary: string | null;
+  } | null>(null);
+  /** Structured Explore → Studio improve seed (URL or session persistence). */
+  const [studioImproveHandoff, setStudioImproveHandoff] = useState<ImproveContextPayload | null>(null);
+  /** Saved composition from ?compositionId= — ordered multi-unit context from Explore. */
+  const [compositionContext, setCompositionContext] = useState<{
+    compositionId: string;
+    name: string;
+    units: ApiBuildUnit[];
+  } | null>(null);
   const [streamFallbackMode, setStreamFallbackMode] = useState(false);
   const [overlayRect, setOverlayRect] = useState<OverlayRect | null>(null);
   const [overlayRegion, setOverlayRegion] = useState<SemanticRegion>("unknown");
@@ -159,6 +214,19 @@ export function MalvStudioPage() {
   const livePlanPhases = (session?.pendingChangeSummary as Record<string, unknown> | null)?.plan as Array<Record<string, unknown>> | undefined;
   const liveConsoleEntries = (session?.pendingChangeSummary as Record<string, unknown> | null)?.console as Array<Record<string, unknown>> | undefined;
   const liveTerminalEntries = (session?.pendingChangeSummary as Record<string, unknown> | null)?.terminal as Array<Record<string, unknown>> | undefined;
+
+  const studioImproveFraming = useMemo(
+    () => (studioImproveHandoff ? deriveStudioImproveFraming(studioImproveHandoff) : null),
+    [studioImproveHandoff]
+  );
+  const studioImproveFeasibilityNote = useMemo(
+    () => (studioImproveHandoff ? studioImprovePreviewFeasibilityNote(studioImproveHandoff) : null),
+    [studioImproveHandoff]
+  );
+  const studioImprovePostureLine = useMemo(
+    () => (studioImproveFraming ? studioImprovePostureCaption(studioImproveFraming.posture) : null),
+    [studioImproveFraming]
+  );
 
   const lastUserLine = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -228,6 +296,267 @@ export function MalvStudioPage() {
       cancelled = true;
     };
   }, [accessToken, fromConversation, setSearchParams]);
+
+  // ── Explore seed (?exploreSeed=) — JSON payload (studioExploreSeed) or legacy plain text ──
+  useEffect(() => {
+    const exploreSeed = searchParams.get("exploreSeed");
+    if (!exploreSeed?.trim()) return;
+    if (searchParams.get("unitId") || searchParams.get("compositionId")) return;
+    const parsed = parseStudioExploreSeed(exploreSeed);
+    persistStudioExploreSeedContext(parsed);
+    const prompt = studioExploreSeedToComposerPrompt(parsed);
+    setComposer((prev) => {
+      if (prev.trim()) return prev;
+      return prompt;
+    });
+    setSearchParams(
+      (p) => {
+        p.delete("exploreSeed");
+        return p;
+      },
+      { replace: true }
+    );
+  }, [searchParams, setSearchParams]);
+
+  // ── Build Unit context handoff (?unitId= param) ──────────────────────────
+  // When navigated from Explore via "Open in Studio", fetch the unit and
+  // pre-populate the composer with its prompt so the user can immediately
+  // start working with it without re-typing the context.
+
+  const unitId = searchParams.get("unitId");
+  const handoffFromSurface = searchParams.get("fromSurface");
+  const handoffLivePreviewLayout = searchParams.get("livePreviewLayout");
+  const handoffImproveSeed = searchParams.get("improveSeed");
+
+  useEffect(() => {
+    if (!unitId || !accessToken) return;
+    const fromSurface = handoffFromSurface;
+    const livePreviewLayout = handoffLivePreviewLayout;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchBuildUnit(accessToken, unitId);
+        if (cancelled || !res.ok || !res.unit) return;
+        let loadedUnit = res.unit;
+
+        let improvePayload: ImproveContextPayload | null = null;
+        if (fromSurface === "explore_preview") {
+          if (handoffImproveSeed?.trim()) {
+            const pr = parseStudioImproveSeed(handoffImproveSeed.trim());
+            if (pr.kind === "improve") {
+              improvePayload = pr.payload;
+              persistStudioImproveSeedContext(pr.payload);
+            }
+          }
+          if (!improvePayload) {
+            const pers = readPersistedStudioImproveSeed();
+            if (pers?.unitId === loadedUnit.id) improvePayload = pers;
+          }
+        }
+
+        if (
+          improvePayload?.autoRunServerImprove === true &&
+          improvePayload.unitId === loadedUnit.id &&
+          fromSurface === "explore_preview"
+        ) {
+          try {
+            const imp = await improveBuildUnit(accessToken, loadedUnit.id, {
+              improveIntent: mapImproveIntentToApiIntent(improvePayload.intent)
+            });
+            if (!cancelled && imp.ok && imp.unit) {
+              const sourceId = loadedUnit.id;
+              inheritExplorePreviewReviewForImprovedUnit(sourceId, imp.unit.id);
+              loadedUnit = imp.unit;
+              improvePayload = {
+                ...improvePayload,
+                unitId: imp.unit.id,
+                autoRunServerImprove: false,
+                exploreHandoff:               improvePayload.exploreHandoff
+                  ? {
+                      ...improvePayload.exploreHandoff,
+                      unitId: imp.unit.id,
+                      continuityContext: {
+                        ...improvePayload.exploreHandoff.continuityContext,
+                        restoreUnitId: imp.unit.id
+                      }
+                    }
+                  : undefined
+              };
+              persistStudioImproveSeedContext(improvePayload);
+              const review = readExplorePreviewReview(imp.unit.id);
+              setExploreStudioReturn({
+                unitId: imp.unit.id,
+                livePreviewLayout: review ? (review.fullscreen ? "fullscreen" : review.inlineMode) : null,
+                compareEngaged: review?.compareEngaged === true ? true : undefined,
+                outcomeHint: improveOutcomeShortLabel(improvePayload.intent)
+              });
+              setPreviewSuccessNote(improveOutcomeShortLabel(improvePayload.intent));
+            }
+          } catch {
+            if (!cancelled) {
+              setPreviewSuccessNote("");
+              improvePayload =
+                improvePayload != null
+                  ? { ...improvePayload, autoRunServerImprove: false }
+                  : improvePayload;
+            }
+          }
+        }
+
+        let stashedExplore = consumeExploreStudioUnitHandoff(loadedUnit.id);
+        if (!stashedExplore) {
+          stashedExplore = consumeExploreStudioUnitHandoff(unitId);
+        }
+        const canonicalExplore = improvePayload?.exploreHandoff ?? stashedExplore;
+        const exploreStudioFlow = fromSurface === "explore_preview" || Boolean(canonicalExplore);
+
+        setUnitContext(loadedUnit);
+        setStudioImproveHandoff(improvePayload);
+
+        if (exploreStudioFlow) {
+          const layout = (
+            livePreviewLayout?.trim() ||
+            String(canonicalExplore?.continuityContext.restoreViewport ?? "fit") ||
+            "fit"
+          ).toLowerCase();
+          setExploreLivePreviewHandoff(layout);
+          const act = readExplorePreviewActionContext(loadedUnit.id);
+          const headlineIntent = improvePayload?.intent ?? act?.improveIntent ?? "generic_improve";
+          const banner = canonicalExplore ? exploreHandoffStudioBannerCopy(canonicalExplore) : null;
+          let primaryLine =
+            improvePayload != null
+              ? studioImprovePrimaryLine(improvePayload)
+              : exploreImproveIntentHeadline(headlineIntent);
+          let secondaryLine = act
+            ? exploreReviewPostureSecondaryLine(act)
+            : exploreReviewPostureSecondaryLineFromLayout(livePreviewLayout);
+          if (banner) {
+            if (improvePayload == null) {
+              primaryLine = banner.primary;
+              secondaryLine = [banner.secondary, secondaryLine].filter(Boolean).join(" · ") || secondaryLine;
+            } else {
+              secondaryLine = [banner.primary, secondaryLine].filter(Boolean).join(" · ") || secondaryLine;
+            }
+          }
+          setExploreLivePreviewFraming({
+            primary: primaryLine,
+            secondary: secondaryLine
+          });
+          setStudioMode("preview");
+          setLayoutMode("full_preview");
+          if (improvePayload) {
+            if (improvePayload.intent === "optimize_mobile") setDeviceMode("mobile");
+            else if (improvePayload.deviceMode === "mobile") setDeviceMode("mobile");
+            else if (improvePayload.deviceMode === "tablet") setDeviceMode("tablet");
+            else if (layout === "mobile") setDeviceMode("mobile");
+            else if (layout === "tablet") setDeviceMode("tablet");
+            else setDeviceMode("desktop");
+          } else if (layout === "mobile") setDeviceMode("mobile");
+          else if (layout === "tablet") setDeviceMode("tablet");
+          else setDeviceMode("desktop");
+        } else {
+          setExploreLivePreviewHandoff(null);
+          setExploreLivePreviewFraming(null);
+          setStudioImproveHandoff(null);
+        }
+        const lines: string[] = [];
+        if (exploreStudioFlow) {
+          if (canonicalExplore) {
+            lines.push(exploreHandoffCalmStudioComposerLead(canonicalExplore, loadedUnit.title));
+          } else {
+            const layout = (livePreviewLayout?.trim() || "fit").toLowerCase();
+            lines.push(
+              `Context: opened from Explore preview (surface: explore_preview, display: ${layout}). Unit: «${loadedUnit.title}».`
+            );
+            lines.push(
+              "Continue refining this build unit in Studio. Studio preview is separate from Explore’s preview surface (iframe or snapshot) — use it for iteration, not as the same embed."
+            );
+            lines.push("");
+          }
+        }
+        if (loadedUnit.prompt) lines.push(loadedUnit.prompt);
+        if (loadedUnit.codeSnippet) lines.push(`\n\nReference snippet:\n\`\`\`\n${loadedUnit.codeSnippet.slice(0, 800)}\n\`\`\``);
+        const supplement =
+          improvePayload && exploreStudioFlow ? studioImproveSeedComposerSupplement(improvePayload) : "";
+        if (lines.length > 0) {
+          const base = lines.join("");
+          setComposer((prev) =>
+            mergeComposerWithImproveSupplementIfEmpty(prev, base, supplement || undefined)
+          );
+        }
+      } catch {
+        // Non-fatal: Studio still loads without unit context
+      } finally {
+        if (!cancelled) {
+          setSearchParams(
+            (p) => {
+              p.delete("unitId");
+              p.delete("fromSurface");
+              p.delete("livePreviewLayout");
+              p.delete("improveSeed");
+              return p;
+            },
+            { replace: true }
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, unitId, handoffFromSurface, handoffLivePreviewLayout, handoffImproveSeed, setSearchParams]);
+
+  const compositionId = searchParams.get("compositionId");
+
+  useEffect(() => {
+    if (!compositionId || !accessToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const compRes = await fetchUnitComposition(accessToken, compositionId);
+        if (cancelled || !compRes.ok || !compRes.composition) return;
+        const comp = compRes.composition;
+        const resolved: ApiBuildUnit[] = [];
+        for (const uid of comp.unitIds) {
+          const ur = await fetchBuildUnit(accessToken, uid);
+          if (ur.ok && ur.unit) resolved.push(ur.unit);
+        }
+        if (cancelled) return;
+        setCompositionContext({ compositionId: comp.id, name: comp.name, units: resolved });
+        setUnitContext(null);
+        const lines: string[] = [];
+        lines.push(`## System: ${comp.name}`);
+        lines.push(
+          `Ordered bundle of ${resolved.length} build unit(s) from Explore. Treat them as one workflow — work through them in order.\n`
+        );
+        resolved.forEach((u, i) => {
+          lines.push(`### ${i + 1}. ${u.title} (${u.type})`);
+          if (u.description?.trim()) lines.push(u.description.trim());
+          if (u.prompt?.trim()) lines.push(`Guidance:\n${u.prompt.trim().slice(0, 2000)}`);
+          if (u.codeSnippet?.trim()) {
+            lines.push(`Reference snippet:\n\`\`\`\n${u.codeSnippet.slice(0, 600)}\n\`\`\``);
+          }
+          lines.push("");
+        });
+        if (lines.length > 2) setComposer(lines.join("\n"));
+      } catch {
+        // Studio still usable without composition context
+      } finally {
+        if (!cancelled) {
+          setSearchParams(
+            (p) => {
+              p.delete("compositionId");
+              return p;
+            },
+            { replace: true }
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, compositionId, setSearchParams]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -606,7 +935,13 @@ export function MalvStudioPage() {
       subtitle="Target the preview, describe the change, and review sandbox output before apply. Heuristic routing and file hints are labeled when they are not attached patch artifacts."
       flush
       right={
-        <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-1 rounded-xl p-1"
+          style={{
+            background: "rgb(var(--malv-surface-raised-rgb))",
+            border: "1px solid rgb(var(--malv-border-rgb) / 0.1)"
+          }}
+        >
           {([
             ["build", "Build"],
             ["preview", "Preview"],
@@ -618,7 +953,20 @@ export function MalvStudioPage() {
             <button
               type="button"
               key={mode}
-              className={`rounded-xl border px-3 py-2 text-xs ${studioMode === mode ? "border-cyan-300/50 bg-cyan-300/20 text-cyan-100" : "border-white/10 bg-white/5 text-white/80"}`}
+              className="rounded-lg px-3 py-1.5 text-[11px] font-medium transition-colors"
+              style={
+                studioMode === mode
+                  ? {
+                      background: "rgb(var(--malv-surface-overlay-rgb))",
+                      color: "rgb(var(--malv-text-rgb) / 0.92)",
+                      border: "1px solid rgb(var(--malv-border-rgb) / 0.12)"
+                    }
+                  : {
+                      background: "transparent",
+                      color: "rgb(var(--malv-muted-rgb))",
+                      border: "1px solid transparent"
+                    }
+              }
               onClick={() => {
                 setStudioMode(mode);
                 if (mode === "inspect") setLayoutMode("chat_inspect");
@@ -634,6 +982,192 @@ export function MalvStudioPage() {
       }
     >
       <div className="grid gap-4 xl:gap-5">
+
+        {/* ── Build Unit context banner ─────────────────────────────────────
+            Shown when navigated from Explore via "Open in Studio".
+            Identifies the source unit and its type so the operator understands
+            what context was loaded into the composer. ──────────────────────── */}
+        {compositionContext && (
+          <div
+            className="flex items-start gap-3 rounded-xl px-4 py-3"
+            style={{
+              background: "rgba(96,165,250,0.07)",
+              border:     "1px solid rgba(96,165,250,0.18)"
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="mb-0.5 text-[9.5px] font-semibold uppercase tracking-[0.14em]" style={{ color: "rgba(96,165,250,0.72)" }}>
+                From Explore — system · {compositionContext.units.length} units
+              </div>
+              <p className="text-[13px] font-medium leading-snug" style={{ color: "rgb(var(--malv-text-rgb) / 0.88)" }}>
+                {compositionContext.name}
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.58)" }}>
+                {compositionContext.units
+                  .slice(0, 5)
+                  .map((u) => u.title)
+                  .join(" → ")}
+                {compositionContext.units.length > 5 ? " → …" : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCompositionContext(null)}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+              style={{ background: "rgba(96,165,250,0.1)", color: "rgba(96,165,250,0.6)" }}
+              aria-label="Dismiss composition context"
+            >
+              <X className="h-3 w-3" strokeWidth={2.2} />
+            </button>
+          </div>
+        )}
+
+        {unitContext && !compositionContext && (
+          <div
+            className="flex items-start gap-3 rounded-xl px-4 py-3"
+            style={{
+              background: "rgba(96,165,250,0.07)",
+              border:     "1px solid rgba(96,165,250,0.18)"
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="mb-0.5 text-[9.5px] font-semibold uppercase tracking-[0.14em]" style={{ color: "rgba(96,165,250,0.72)" }}>
+                {exploreLivePreviewHandoff
+                  ? `From Explore preview — ${unitContext.type}`
+                  : `From Explore — ${unitContext.type}`}
+              </div>
+              <p className="text-[13px] font-medium leading-snug" style={{ color: "rgb(var(--malv-text-rgb) / 0.88)" }}>
+                {unitContext.title}
+              </p>
+              {exploreLivePreviewHandoff && studioImproveHandoff && studioImproveFraming ? (
+                <div className="mt-1.5 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className="inline-flex max-w-full items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-tight"
+                      style={{
+                        color: "rgba(96,165,250,0.95)",
+                        border: "1px solid rgba(96,165,250,0.28)",
+                        background: "rgba(96,165,250,0.08)"
+                      }}
+                    >
+                      {studioImproveFraming.intentLabel}
+                    </span>
+                  </div>
+                  <p className="text-[12.5px] font-semibold leading-snug tracking-tight" style={{ color: "rgba(96,165,250,0.95)" }}>
+                    {studioImproveFraming.headline}
+                  </p>
+                  {studioImproveFraming.sublabel ? (
+                    <p className="text-[10.5px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.62)" }}>
+                      {studioImproveFraming.sublabel}
+                    </p>
+                  ) : null}
+                  {exploreLivePreviewFraming?.secondary ? (
+                    <p className="text-[10.5px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.58)" }}>
+                      {exploreLivePreviewFraming.secondary}
+                    </p>
+                  ) : null}
+                  {studioImproveFraming.compareHandoffNote &&
+                  !exploreLivePreviewFraming?.secondary?.toLowerCase().includes("compare") ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.52)" }}>
+                      {studioImproveFraming.compareHandoffNote}
+                    </p>
+                  ) : null}
+                  {studioImproveFraming.reviewFactsLine ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.5)" }}>
+                      {studioImproveFraming.reviewFactsLine}
+                    </p>
+                  ) : null}
+                  {studioImproveFraming.optionalModelRefinementNote ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.48)" }}>
+                      <span className="font-semibold" style={{ color: "rgb(var(--malv-text-rgb) / 0.55)" }}>
+                        Optional phrasing:{" "}
+                      </span>
+                      {studioImproveFraming.optionalModelRefinementNote}
+                    </p>
+                  ) : null}
+                  {studioImproveFeasibilityNote ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.52)" }}>
+                      {studioImproveFeasibilityNote}
+                    </p>
+                  ) : null}
+                  {studioImprovePostureLine ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.48)" }}>
+                      {studioImprovePostureLine}
+                    </p>
+                  ) : null}
+                  {studioImproveFraming.focusHint ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.54)" }}>
+                      Section focus: {studioImproveFraming.focusHint}
+                    </p>
+                  ) : null}
+                </div>
+              ) : exploreLivePreviewHandoff && exploreLivePreviewFraming ? (
+                <div className="mt-1.5 space-y-0.5">
+                  <p className="text-[11px] font-semibold leading-snug tracking-tight" style={{ color: "rgba(96,165,250,0.9)" }}>
+                    {exploreLivePreviewFraming.primary}
+                  </p>
+                  {exploreLivePreviewFraming.secondary ? (
+                    <p className="text-[10.5px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.62)" }}>
+                      {exploreLivePreviewFraming.secondary}
+                    </p>
+                  ) : null}
+                  {studioImproveHandoff?.previewFeasibility?.mode ? (
+                    <p className="text-[10px] leading-relaxed" style={{ color: "rgb(var(--malv-muted-rgb) / 0.52)" }}>
+                      Explore preview snapshot: {studioImproveHandoff.previewFeasibility.mode}
+                      {studioImproveHandoff.previewFeasibility.framework
+                        ? ` · ${studioImproveHandoff.previewFeasibility.framework}`
+                        : ""}
+                    </p>
+                  ) : null}
+                </div>
+              ) : exploreLivePreviewHandoff ? (
+                <p className="mt-1 text-[10.5px] font-medium capitalize leading-snug" style={{ color: "rgba(96,165,250,0.78)" }}>
+                  Preview display when you left Explore: {exploreLivePreviewHandoff.replace(/-/g, " ")}
+                </p>
+              ) : null}
+              {unitContext.description && (
+                <p className="mt-0.5 text-[11.5px]" style={{ color: "rgb(var(--malv-muted-rgb) / 0.58)" }}>
+                  {unitContext.description.length > 120 ? `${unitContext.description.slice(0, 117)}…` : unitContext.description}
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              {exploreLivePreviewHandoff && unitContext ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = readExplorePreviewReview(unitContext.id);
+                    setExploreStudioReturn({
+                      unitId: unitContext.id,
+                      livePreviewLayout: r ? (r.fullscreen ? "fullscreen" : r.inlineMode) : exploreLivePreviewHandoff,
+                      compareEngaged: r?.compareEngaged === true ? true : undefined
+                    });
+                    navigate("/app/explore");
+                  }}
+                  className="rounded-lg px-2 py-1 text-[10px] font-semibold transition-opacity hover:opacity-90"
+                  style={{ background: "rgba(96,165,250,0.12)", color: "rgba(96,165,250,0.88)" }}
+                >
+                  Back to Explore
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setUnitContext(null);
+                  setExploreLivePreviewHandoff(null);
+                  setExploreLivePreviewFraming(null);
+                  setStudioImproveHandoff(null);
+                }}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                style={{ background: "rgba(96,165,250,0.1)", color: "rgba(96,165,250,0.6)" }}
+                aria-label="Dismiss unit context"
+              >
+                <X className="h-3 w-3" strokeWidth={2.2} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {hasUserSubmitted || pendingSummary ? (
           <div className="rounded-2xl border border-cyan-400/25 bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(15,17,24,0.95))] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.25)]">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -674,17 +1208,76 @@ export function MalvStudioPage() {
         ) : null}
 
         {layoutMode !== "full_preview" ? (
-          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[rgba(16,18,26,0.8)] p-2">
-            {onboardingStage >= 2 ? <button className="rounded-lg px-3 py-2 text-xs text-white/80 hover:bg-white/5" onClick={() => setShowInspect((v) => !v)}><LayoutPanelTop className="mr-1 inline h-3.5 w-3.5" />Inspect</button> : null}
-            {onboardingStage >= 4 ? <button className="rounded-lg px-3 py-2 text-xs text-white/80 hover:bg-white/5" onClick={() => setShowConsole((v) => !v)}><Bot className="mr-1 inline h-3.5 w-3.5" />Console</button> : null}
-            {onboardingStage >= 3 ? <button className="rounded-lg px-3 py-2 text-xs text-white/80 hover:bg-white/5" onClick={() => setShowVersions((v) => !v)}><History className="mr-1 inline h-3.5 w-3.5" />Versions</button> : null}
-            <div className="mx-2 h-5 w-px bg-white/10" />
-            <button className="rounded-lg px-2 py-2 text-white/75 hover:bg-white/5" onClick={() => setDeviceMode("desktop")}><Monitor className="h-4 w-4" /></button>
-            <button className="rounded-lg px-2 py-2 text-white/75 hover:bg-white/5" onClick={() => setDeviceMode("tablet")}><Tablet className="h-4 w-4" /></button>
-            <button className="rounded-lg px-2 py-2 text-white/75 hover:bg-white/5" onClick={() => setDeviceMode("mobile")}><Smartphone className="h-4 w-4" /></button>
-            <button className="ml-auto rounded-lg px-2 py-2 text-white/75 hover:bg-white/5" onClick={openPreviewFullscreen}><Fullscreen className="h-4 w-4" /></button>
-            <button className="rounded-lg px-3 py-2 text-xs text-white/80 hover:bg-white/5" onClick={() => setShowAdminInsights((v) => !v)}>Operator insights</button>
-            <button className="rounded-lg px-3 py-2 text-xs text-white/70 hover:bg-white/5" onClick={restartHints}>Hints</button>
+          <div
+            className="flex flex-wrap items-center gap-1 rounded-xl px-2 py-1.5"
+            style={{
+              background: "rgb(var(--malv-surface-raised-rgb))",
+              border: "1px solid rgb(var(--malv-border-rgb) / 0.08)"
+            }}
+          >
+            {onboardingStage >= 2 ? (
+              <button
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] transition-colors"
+                style={{ color: showInspect ? "rgb(var(--malv-text-rgb) / 0.9)" : "rgb(var(--malv-muted-rgb))" }}
+                onClick={() => setShowInspect((v) => !v)}
+              >
+                <LayoutPanelTop className="h-3.5 w-3.5" />Inspect
+              </button>
+            ) : null}
+            {onboardingStage >= 4 ? (
+              <button
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] transition-colors"
+                style={{ color: showConsole ? "rgb(var(--malv-text-rgb) / 0.9)" : "rgb(var(--malv-muted-rgb))" }}
+                onClick={() => setShowConsole((v) => !v)}
+              >
+                <Bot className="h-3.5 w-3.5" />Console
+              </button>
+            ) : null}
+            {onboardingStage >= 3 ? (
+              <button
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] transition-colors"
+                style={{ color: showVersions ? "rgb(var(--malv-text-rgb) / 0.9)" : "rgb(var(--malv-muted-rgb))" }}
+                onClick={() => setShowVersions((v) => !v)}
+              >
+                <History className="h-3.5 w-3.5" />Versions
+              </button>
+            ) : null}
+            <div className="mx-1 h-4 w-px" style={{ background: "rgb(var(--malv-border-rgb) / 0.1)" }} />
+            {([
+              ["desktop", Monitor],
+              ["tablet", Tablet],
+              ["mobile", Smartphone]
+            ] as Array<[DeviceMode, typeof Monitor]>).map(([mode, Icon]) => (
+              <button
+                key={mode}
+                className="rounded-lg p-1.5 transition-colors"
+                style={{ color: deviceMode === mode ? "rgb(var(--malv-text-rgb) / 0.85)" : "rgb(var(--malv-muted-rgb))" }}
+                onClick={() => setDeviceMode(mode)}
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            ))}
+            <button
+              className="ml-auto rounded-lg p-1.5 transition-colors"
+              style={{ color: "rgb(var(--malv-muted-rgb))" }}
+              onClick={openPreviewFullscreen}
+            >
+              <Fullscreen className="h-4 w-4" />
+            </button>
+            <button
+              className="rounded-lg px-2.5 py-1.5 text-[11px] transition-colors"
+              style={{ color: "rgb(var(--malv-muted-rgb))" }}
+              onClick={() => setShowAdminInsights((v) => !v)}
+            >
+              Insights
+            </button>
+            <button
+              className="rounded-lg px-2.5 py-1.5 text-[11px] transition-colors"
+              style={{ color: "rgb(var(--malv-muted-rgb) / 0.6)" }}
+              onClick={restartHints}
+            >
+              Hints
+            </button>
           </div>
         ) : null}
 
@@ -710,32 +1303,52 @@ export function MalvStudioPage() {
           </AnimatePresence>
         ) : null}
 
-        <div className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-2xl border border-emerald-300/25 bg-emerald-400/10 p-3 text-xs text-emerald-100">
-            <div className="mb-1 flex items-center gap-1.5 font-medium"><ShieldCheck className="h-4 w-4" />Safe execution active</div>
-            <div>Sandbox is active, running in preview environment, and not touching production directly.</div>
+        <div className="grid gap-2 lg:grid-cols-3">
+          <div
+            className="rounded-xl p-3 text-[11px]"
+            style={{
+              background: "rgb(52 211 153 / 0.06)",
+              border: "1px solid rgb(52 211 153 / 0.18)",
+              color: "rgb(52 211 153 / 0.9)"
+            }}
+          >
+            <div className="mb-1 flex items-center gap-1.5 font-medium"><ShieldCheck className="h-3.5 w-3.5" />Safe execution active</div>
+            <div className="opacity-75">Sandbox is active — not touching production directly.</div>
           </div>
-          <div className={`rounded-2xl border p-3 text-xs ${confidenceTone}`}>
-            <div className="mb-1 font-medium">Confidence & risk</div>
-            <div>{confidence === "high" ? "Ready to apply." : confidence === "medium" ? "Review suggested before apply." : "Needs validation before apply."}</div>
-            <div className="mt-1 opacity-80">Risk level: {riskLevel}</div>
+          <div
+            className="rounded-xl p-3 text-[11px]"
+            style={{
+              background: confidence === "high" ? "rgb(52 211 153 / 0.06)" : confidence === "low" ? "rgb(251 191 36 / 0.06)" : "rgb(56 189 248 / 0.06)",
+              border: confidence === "high" ? "1px solid rgb(52 211 153 / 0.18)" : confidence === "low" ? "1px solid rgb(251 191 36 / 0.18)" : "1px solid rgb(56 189 248 / 0.18)",
+              color: confidence === "high" ? "rgb(52 211 153 / 0.9)" : confidence === "low" ? "rgb(251 191 36 / 0.9)" : "rgb(56 189 248 / 0.9)"
+            }}
+          >
+            <div className="mb-1 font-medium">Confidence</div>
+            <div className="opacity-80">{confidence === "high" ? "Ready to apply." : confidence === "medium" ? "Review before apply." : "Needs validation."}</div>
+            <div className="mt-1 opacity-60">Risk: {riskLevel}</div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-white/75">
-            <div className="mb-1 flex items-center gap-1.5 font-medium text-white/90"><CheckCheck className="h-4 w-4" />State</div>
-            <div>{stateTag === "applied" ? "Applied to project" : "Preview only (safe)"}.</div>
-            <div className="mt-1">
+          <div
+            className="rounded-xl p-3 text-[11px]"
+            style={{
+              background: "rgb(var(--malv-surface-raised-rgb))",
+              border: "1px solid rgb(var(--malv-border-rgb) / 0.08)",
+              color: "rgb(var(--malv-text-rgb) / 0.7)"
+            }}
+          >
+            <div className="mb-1 flex items-center gap-1.5 font-medium" style={{ color: "rgb(var(--malv-text-rgb) / 0.85)" }}><CheckCheck className="h-3.5 w-3.5" />State</div>
+            <div className="opacity-80">{stateTag === "applied" ? "Applied to project" : "Preview only (safe)"}.</div>
+            <div className="mt-1.5">
               <span
-                className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                  liveState === "live"
-                    ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-100"
-                    : liveState === "reconnecting"
-                      ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
-                      : "border-white/15 bg-white/5 text-white/70"
-                }`}
+                className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                style={{
+                  background: liveState === "live" ? "rgb(52 211 153 / 0.1)" : liveState === "reconnecting" ? "rgb(251 191 36 / 0.1)" : "rgb(var(--malv-surface-overlay-rgb))",
+                  border: liveState === "live" ? "1px solid rgb(52 211 153 / 0.2)" : liveState === "reconnecting" ? "1px solid rgb(251 191 36 / 0.2)" : "1px solid rgb(var(--malv-border-rgb) / 0.1)",
+                  color: liveState === "live" ? "rgb(52 211 153 / 0.9)" : liveState === "reconnecting" ? "rgb(251 191 36 / 0.9)" : "rgb(var(--malv-muted-rgb))"
+                }}
               >
-                {liveState === "live" ? "Live" : liveState === "reconnecting" ? "Reconnecting..." : "Offline"}
+                {liveState === "live" ? "Live" : liveState === "reconnecting" ? "Reconnecting…" : "Offline"}
               </span>
-              {streamFallbackMode ? <span className="ml-2 text-[11px] text-white/55">Snapshot fallback active</span> : null}
+              {streamFallbackMode ? <span className="ml-2 text-[10px] opacity-50">Snapshot fallback</span> : null}
             </div>
           </div>
           <AnimatePresence>

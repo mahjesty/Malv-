@@ -73,15 +73,14 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
   const imageInputRef = useRef<HTMLInputElement>(null);
   const plusAnchorRef = useRef<HTMLButtonElement>(null);
   const [malvPlusOpen, setMalvPlusOpen] = useState(false);
-  const [focused, setFocused] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingComposerAttachment[]>([]);
   const uploadTimersRef = useRef<number[]>([]);
   const pendingFilesRef = useRef(pendingFiles);
   pendingFilesRef.current = pendingFiles;
   const latestValueRef = useRef(value);
   const MAX_COMPOSER_ATTACHMENTS = 12;
-  const MIN_TEXTAREA_HEIGHT_PX = 40;
-  const MAX_TEXTAREA_HEIGHT_PX = 160;
+  const MIN_TEXTAREA_HEIGHT_PX = 42;
+  const MAX_TEXTAREA_HEIGHT_PX = 144;
   const DEFAULT_TEXTAREA_HEIGHT_FALLBACK_PX = MIN_TEXTAREA_HEIGHT_PX;
   const defaultTextareaHeightPxRef = useRef<number>(DEFAULT_TEXTAREA_HEIGHT_FALLBACK_PX);
 
@@ -353,16 +352,10 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
   }
 
   return (
-    <div className="shrink-0 pb-[max(0.125rem,env(safe-area-inset-bottom))] sm:pb-0">
+    <div className="relative shrink-0 pb-[max(0.06rem,env(safe-area-inset-bottom))] sm:pb-0">
       <div
-        className="malv-chat-composer-shell malv-input-dock relative overflow-hidden rounded-[1.25rem] transition-[transform,box-shadow,border-color,background-color,opacity] duration-200 sm:rounded-[1.6rem]"
+        className="malv-chat-composer-shell malv-input-dock relative overflow-hidden"
         style={{
-          background: "var(--malv-chat-composer-bg)",
-          border: `1px solid ${focused ? "var(--malv-chat-composer-border-strong)" : "var(--malv-chat-composer-border)"}`,
-          backdropFilter: "blur(14px)",
-          boxShadow: focused
-            ? "var(--malv-chat-composer-shadow-focus), inset 0 1px 0 var(--malv-chat-surface-highlight)"
-            : "var(--malv-chat-composer-shadow), inset 0 1px 0 var(--malv-chat-surface-highlight)",
           opacity: inlineEditingActive ? 0.72 : 1
         }}
       >
@@ -384,7 +377,7 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
             aria-hidden
           />
 
-        <div className="px-2.5 py-1.5 sm:px-4 sm:py-2">
+        <div className="relative z-[1] px-3 py-2 sm:px-4 sm:py-2.5">
           <AnimatePresence initial={false}>
             {pendingFiles.length ? (
               <motion.div
@@ -421,29 +414,27 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
             ) : null}
           </AnimatePresence>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-1.5">
             <motion.button
               ref={plusAnchorRef}
               type="button"
               onClick={() => setMalvPlusOpen((open) => !open)}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               aria-label="MALV+ actions"
               aria-expanded={malvPlusOpen}
               aria-haspopup="menu"
               aria-controls={malvPlusOpen ? "malv-plus-menu" : undefined}
-              className="malv-interactive inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-malv-text/60 transition-colors hover:text-malv-text/90 focus:outline-none active:bg-white/[0.04] disabled:opacity-40 sm:h-8 sm:w-8"
+              className="malv-interactive inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground focus:outline-none disabled:opacity-40 sm:h-9 sm:w-9"
               disabled={inlineEditingActive}
             >
-              <Plus className="h-[18px] w-[18px] sm:h-4 sm:w-4" />
+              <Plus className="h-4 w-4" />
             </motion.button>
 
             <div className="min-w-0 flex-1">
               <textarea
                 ref={ta}
                 value={value}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
                 onChange={(e) => {
                   const nextValue = e.target.value;
                   onChange(nextValue);
@@ -453,15 +444,15 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
                 placeholder={placeholder}
                 rows={1}
                 className={[
-                  "min-h-[40px] w-full max-h-[160px] resize-none overflow-y-auto bg-transparent px-3 py-2 text-[13px] leading-[1.65] text-malv-text placeholder:text-malv-text/30 box-border sm:px-3.5 sm:py-2 sm:text-sm",
+                  "malv-composer-input min-h-[42px] w-full max-h-[144px] resize-none overflow-y-auto bg-transparent px-3 py-2.5 text-[13px] leading-[1.5] box-border sm:px-3.5 sm:py-2.5 sm:text-[14px]",
                   "border-0 outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 focus-visible:ring-0 shadow-none appearance-none"
                 ].join(" ")}
                 disabled={voiceBusy || inlineEditingActive}
               />
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-1.5">
-              <motion.button
+            <div className="flex items-center gap-0.5 sm:gap-1">
+              <button
                 type="button"
                 onClick={() => {
                   if (primaryActionMode === "stop") {
@@ -472,30 +463,24 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
                 }}
                 disabled={primaryActionDisabled}
                 aria-label={primaryActionMode === "stop" ? "Stop generation" : "Send message"}
-                whileHover={!primaryActionDisabled ? { scale: 1.03 } : undefined}
-                whileTap={!primaryActionDisabled ? { scale: 0.97 } : undefined}
-                className="malv-interactive inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-malv-text/55 transition-colors active:bg-white/[0.04] disabled:opacity-35 sm:h-8 sm:w-8"
-                style={{
-                  display: showVoicePrimary ? "none" : "inline-flex",
-                  color:
-                    primaryActionMode === "stop"
-                      ? "var(--malv-chat-action-icon-strong)"
-                      : hasTypedText || pendingReady
-                        ? "var(--malv-chat-action-icon-strong)"
-                        : "var(--malv-chat-action-icon-muted)",
-                  filter: primaryActionMode === "stop"
-                    ? "none"
+                className={[
+                  "malv-composer-send inline-flex shrink-0 items-center justify-center rounded-xl border disabled:opacity-35",
+                  primaryActionMode === "stop"
+                    ? "malv-composer-send--stop h-9 w-9 border-white/[0.12] text-foreground hover:bg-white/[0.06]"
                     : canSend
-                      ? "drop-shadow(0 2px 8px var(--malv-chat-action-icon-shadow))"
-                      : "none"
+                      ? "malv-composer-send--ready h-9 w-9"
+                      : "h-9 w-9 border-transparent text-muted-foreground hover:border-white/[0.08] hover:bg-white/[0.06] hover:text-foreground"
+                ].join(" ")}
+                style={{
+                  display: showVoicePrimary ? "none" : "inline-flex"
                 }}
               >
                 {primaryActionMode === "stop" ? (
-                  <span className="h-[12px] w-[12px] rounded-[3px] bg-current sm:h-[11px] sm:w-[11px]" aria-hidden />
+                  <span className="h-[10px] w-[10px] rounded-[2px] bg-current" aria-hidden />
                 ) : (
-                  <Send className="h-[18px] w-[18px] sm:h-4 sm:w-4" />
+                  <Send className="h-4 w-4" strokeWidth={2.25} />
                 )}
-              </motion.button>
+              </button>
 
               {voice && showVoicePrimary ? (
                 <VoiceActionButton
@@ -512,13 +497,13 @@ export const OperatorChatComposer = forwardRef<OperatorChatComposerHandle, Opera
           </div>
         </div>
       </div>
-      <div className="mt-1.5 flex flex-col items-center justify-center gap-1 sm:mt-1.5 sm:gap-1.5">
+      <div className="mt-1 flex flex-col items-center justify-center gap-0.5 sm:mt-1">
         {inlineEditingActive ? (
-          <span className="rounded-full border border-amber-200/20 bg-amber-300/8 px-2 py-0.5 text-[10px] text-amber-100/70 sm:px-2.5 sm:py-1 sm:text-[11px]">
+          <span className="rounded-full border border-amber-200/20 bg-amber-300/8 px-2 py-0.5 text-[9px] text-amber-100/70 sm:text-[10px]">
             Editing previous message inline
           </span>
         ) : null}
-        <p className="text-center text-[10px] leading-snug text-malv-text/45 sm:text-[11px]">
+        <p className="text-center text-[9px] leading-snug text-muted-foreground/90 sm:text-[10px]">
           MALV may produce inaccurate information. Verify critical facts.
         </p>
       </div>

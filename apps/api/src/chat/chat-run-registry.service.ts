@@ -1,9 +1,16 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { MalvDistributedCoordinationService } from "../common/malv-distributed-coordination.service";
 
 type TurnRegistration = {
   abortController: AbortController;
   userId: string;
   cancelled: boolean;
+};
+
+type CancelRequestResult = {
+  ok: boolean;
+  localAbortApplied: boolean;
+  distributedMarkerRecorded: boolean;
 };
 
 /**
@@ -13,6 +20,8 @@ type TurnRegistration = {
 export class ChatRunRegistryService {
   private readonly logger = new Logger(ChatRunRegistryService.name);
   private readonly byAssistantMessageId = new Map<string, TurnRegistration>();
+
+  constructor(private readonly distributed: MalvDistributedCoordinationService) {}
 
   registerTurn(args: { assistantMessageId: string; userId: string; abortController: AbortController }) {
     this.byAssistantMessageId.set(args.assistantMessageId, {
@@ -25,18 +34,20 @@ export class ChatRunRegistryService {
     );
   }
 
-  unregisterTurn(assistantMessageId: string) {
+  async unregisterTurn(assistantMessageId: string) {
     this.byAssistantMessageId.delete(assistantMessageId);
+    await this.distributed.clearCancelRequested(assistantMessageId);
     this.logger.log(`[MALV RUNTIME] run registry unregister assistantMessageId=${assistantMessageId}`);
   }
 
-  requestCancel(args: { assistantMessageId: string; userId: string }): boolean {
+  async requestCancel(args: { assistantMessageId: string; userId: string }): Promise<CancelRequestResult> {
+    const distributedMarkerRecorded = await this.distributed.recordCancelRequested(args.assistantMessageId);
     const reg = this.byAssistantMessageId.get(args.assistantMessageId);
     if (!reg || reg.userId !== args.userId) {
       this.logger.warn(
-        `[MALV RUNTIME] cancel requested but no active turn assistantMessageId=${args.assistantMessageId}`
+        `[MALV RUNTIME] cancel requested but no local in-flight turn assistantMessageId=${args.assistantMessageId}`
       );
-      return false;
+      return { ok: false, localAbortApplied: false, distributedMarkerRecorded };
     }
     reg.cancelled = true;
     try {
@@ -47,11 +58,13 @@ export class ChatRunRegistryService {
     this.logger.log(
       `[MALV RUNTIME] cancel propagated assistantMessageId=${args.assistantMessageId} userId=${args.userId}`
     );
-    return true;
+    return { ok: true, localAbortApplied: true, distributedMarkerRecorded };
   }
 
-  isCancelled(assistantMessageId: string): boolean {
-    return this.byAssistantMessageId.get(assistantMessageId)?.cancelled ?? false;
+  async isCancelled(assistantMessageId: string): Promise<boolean> {
+    const local = this.byAssistantMessageId.get(assistantMessageId)?.cancelled ?? false;
+    if (local) return true;
+    return this.distributed.isCancelRequested(assistantMessageId);
   }
 
   getAbortSignal(assistantMessageId: string): AbortSignal | undefined {

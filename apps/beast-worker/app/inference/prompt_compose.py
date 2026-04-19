@@ -10,7 +10,7 @@ from app.inference.models import InferMode, InferenceRequest
 
 def build_prompt_for_provider(req: InferenceRequest) -> str:
     """
-    API usually sends malvPromptAlreadyExpanded=True with a full operator prompt from malv-brain-prompt.ts.
+    API usually sends malvPromptAlreadyExpanded=True with a full MALV prompt from malv-brain-prompt.ts.
     If False, apply worker-side MALV framing (legacy / direct worker callers).
     """
     ctx: Dict[str, Any] = req.context
@@ -22,6 +22,6 @@ def build_prompt_for_provider(req: InferenceRequest) -> str:
     if req.system_prompt:
         return (
             f"{req.system_prompt.strip()}\n\n### Context\n{ctx_block or '(no extra context block)'}\n\n"
-            f"### User message\n{req.prompt}\n\n### Your reply (MALV operator)\n"
+            f"### User message\n{req.prompt}\n\n### Your reply (MALV)\n"
         )
     return wrap_infer_prompt(user_prompt=req.prompt, mode=mode, context_summary=ctx_block)

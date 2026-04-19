@@ -22,16 +22,39 @@ function phaseLines(ids: readonly InternalPhaseId[]): string[] {
 /**
  * User-facing clarification when strategy is require_clarification (deterministic; no model).
  */
+/**
+ * Targeted clarification when multiple intents score similarly but the message is not yet flagged `require_clarification`.
+ * Deterministic; no model call.
+ */
+export function buildSoftDualIntentClarificationReply(classified: ClassifiedIntent): string {
+  const entries = (Object.entries(classified.scores) as [string, number][])
+    .filter(([, s]) => s >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([k]) => k.replace(/_/g, " "));
+  const options =
+    entries.length >= 2
+      ? `**${entries[0]}** or **${entries[1]}**`
+      : entries.length === 1
+        ? `**${entries[0]!}** or something else`
+        : "a concrete engineering goal";
+  return [
+    "I can read this a couple of different ways — which direction do you want?",
+    `Do you mean ${options}?`,
+    "A short pointer is enough (for example: fix the bug, add the feature, explain how X works) — then I’ll dive in."
+  ].join("\n\n");
+}
+
 export function buildAutonomousClarificationReply(classified: ClassifiedIntent): string {
   const reason = classified.ambiguity.reason ?? "ambiguous_prompt";
   const lines = [
-    "I understand you want help — I need one concrete detail before I run the full pipeline.",
+    "I want to help — I need one concrete anchor so I don’t aim at the wrong thing.",
     reason === "message_too_vague"
       ? "What exactly should change (file area, feature name, error message, or goal)?"
       : reason === "short_low_signal"
-        ? "Your message is very short. What outcome do you want (e.g. fix a bug, add a feature, explain something)?"
-        : "A couple of intents are equally likely from this message — what is the main goal (build, fix, refactor, or design)?",
-    "Once you specify that, I will handle structure, phases, and verification internally."
+        ? "Your message is very short. What outcome do you want (for example: fix a bug, add a feature, explain a topic)?"
+        : "From this wording, a few engineering directions look equally likely — what’s the main goal (build, fix, refactor, or design)?",
+    "Once you point me at that, I’ll take it from there."
   ];
   return lines.join("\n\n");
 }
@@ -45,6 +68,8 @@ export function buildAutonomousOrchestrationBlock(args: {
 }): string | null {
   const { classified, strategy } = args;
   if (strategy.mode === "require_clarification") return null;
+  // Companion-light turns intentionally use no internal phase list — skip engineering-loop scaffolding.
+  if (!strategy.internalPhases.length) return null;
 
   const intentLine = `Classified intent (internal): ${classified.primaryIntent}; scope=${classified.scopeSize}; complexity=${classified.complexity}; domains=${classified.domains.join(", ") || "general"}.`;
   const risk = `Risk tier (internal): ${strategy.riskTier}. Large or high-risk work stays phased and grounded — no invented telemetry or repo facts.`;

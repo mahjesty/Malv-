@@ -21,6 +21,7 @@ import { MultimodalDeepExtractService } from "../file-understanding/multimodal-d
 import { ObservabilityService } from "../common/observability.service";
 import { ClusterLeaderService } from "../infra/cluster-leader.service";
 import { RuntimeEventBusService } from "../common/runtime-event-bus.service";
+import { WorkspaceTaskExecutionEngineService } from "../workspace/workspace-task-execution-engine.service";
 
 @Injectable()
 export class BackgroundJobRunnerService implements OnModuleInit, OnModuleDestroy {
@@ -51,7 +52,8 @@ export class BackgroundJobRunnerService implements OnModuleInit, OnModuleDestroy
     private readonly multimodal: MultimodalDeepExtractService,
     private readonly observability: ObservabilityService,
     private readonly clusterLeader: ClusterLeaderService,
-    private readonly runtimeBus: RuntimeEventBusService
+    private readonly runtimeBus: RuntimeEventBusService,
+    private readonly workspaceTaskExecution: WorkspaceTaskExecutionEngineService
   ) {
     this.workerNodeName =
       this.cfg.get<string>("JOB_RUNNER_NODE_NAME") ?? `${process.env.HOSTNAME ?? "node"}-${process.pid}`;
@@ -60,6 +62,11 @@ export class BackgroundJobRunnerService implements OnModuleInit, OnModuleDestroy
   }
 
   onModuleInit() {
+    const enabled = (this.cfg.get<string>("MALV_BACKGROUND_WORKLOADS_ENABLED") ?? "true").toLowerCase() !== "false";
+    if (!enabled) {
+      this.logger.warn("Background job runner disabled via MALV_BACKGROUND_WORKLOADS_ENABLED=false.");
+      return;
+    }
     const intervalMs = Number(this.cfg.get<string>("JOB_RUNNER_INTERVAL_MS") ?? "2000");
     this.timer = setInterval(() => {
       void this.tick();
@@ -95,6 +102,10 @@ export class BackgroundJobRunnerService implements OnModuleInit, OnModuleDestroy
         await this.processBeastProactiveScan();
         await this.runRetentionCleanup();
         await this.recoverStaleJobLeases();
+        const te = await this.workspaceTaskExecution.processDueTasksTick();
+        if (te.processed > 0) {
+          this.logger.log(`Workspace task execution: processed=${te.processed}`);
+        }
       });
       await this.heartbeatWorker();
     } catch (e) {

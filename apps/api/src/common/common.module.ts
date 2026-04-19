@@ -14,6 +14,9 @@ import { FileEntity } from "../db/entities/file.entity";
 import { ObservabilityService } from "./observability.service";
 import { MetricsController } from "./metrics.controller";
 import { RuntimeEventBusService } from "./runtime-event-bus.service";
+import { MalvValidationTelemetryService } from "./malv-validation-telemetry.service";
+import { MalvValidationController } from "./malv-validation.controller";
+import { MalvDistributedCoordinationService } from "./malv-distributed-coordination.service";
 
 @Module({
   imports: [
@@ -21,8 +24,26 @@ import { RuntimeEventBusService } from "./runtime-event-bus.service";
     forwardRef(() => SecurityModule),
     TypeOrmModule.forFeature([RateLimitEventEntity, RoomMemberEntity, CollaborationRoomEntity, CallSessionEntity, FileEntity])
   ],
-  controllers: [MetricsController],
-  providers: [RateLimitService, RateLimitGuard, MalvFeatureFlagsService, AuthorizationService, ObservabilityService, RuntimeEventBusService],
-  exports: [RateLimitService, RateLimitGuard, MalvFeatureFlagsService, AuthorizationService, ObservabilityService, RuntimeEventBusService]
+  controllers: [MetricsController, MalvValidationController],
+  providers: [
+    RateLimitService,
+    RateLimitGuard,
+    MalvFeatureFlagsService,
+    AuthorizationService,
+    ObservabilityService,
+    RuntimeEventBusService,
+    MalvValidationTelemetryService,
+    MalvDistributedCoordinationService
+  ],
+  exports: [
+    RateLimitService,
+    RateLimitGuard,
+    MalvFeatureFlagsService,
+    AuthorizationService,
+    ObservabilityService,
+    RuntimeEventBusService,
+    MalvValidationTelemetryService,
+    MalvDistributedCoordinationService
+  ]
 })
 export class CommonModule {}

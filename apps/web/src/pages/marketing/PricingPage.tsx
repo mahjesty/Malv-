@@ -1,7 +1,16 @@
 import MarketingLayout from "./MarketingLayout";
 import { Card, Button } from "@malv/ui";
 
-function PlanCard(props: { name: string; price: string; desc: string; perks: string[]; cta: string }) {
+function PlanCard(props: {
+  name: string;
+  price: string;
+  desc: string;
+  perks: string[];
+  cta: string;
+  /** Paid / highlighted tier — MALV gold (rare premium CTA). */
+  ctaVariant?: "primary" | "premium";
+}) {
+  const variant = props.ctaVariant ?? "primary";
   return (
     <Card variant="glass" className="p-4">
       <div className="text-sm font-bold">{props.name}</div>
@@ -15,7 +24,7 @@ function PlanCard(props: { name: string; price: string; desc: string; perks: str
         ))}
       </div>
       <div className="mt-4">
-        <Button onClick={() => (window.location.href = "/auth/signup")} className="w-full px-6">
+        <Button variant={variant} onClick={() => (window.location.href = "/auth/signup")} className="w-full px-6">
           {props.cta}
         </Button>
       </div>
@@ -46,6 +55,7 @@ export default function PricingPage() {
             desc="Premium companion + Beast-ready orchestration."
             perks={["Beast Mode levels", "Vault isolation UX", "File understanding pipeline"]}
             cta="Go Private Plus"
+            ctaVariant="premium"
           />
         </div>
 

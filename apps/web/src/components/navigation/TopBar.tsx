@@ -1,18 +1,41 @@
 import { useContext, type ReactNode } from "react";
 import { ThemeContext } from "../../lib/theme/ThemeProvider";
-import { Button } from "@malv/ui";
-import { LogoMark } from "@malv/ui";
-import { ActivityIndicator } from "@malv/ui";
 
-function activityLabel(mode: "live" | "processing" | "idle") {
-  switch (mode) {
-    case "live":
-      return "Live";
-    case "processing":
-      return "Processing";
-    default:
-      return "Idle";
+function SunIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
+function ActivityDot({ mode }: { mode: "live" | "processing" | "idle" }) {
+  if (mode === "live") {
+    return (
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+      </span>
+    );
   }
+  if (mode === "processing") {
+    return (
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-40" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-brand/80" />
+      </span>
+    );
+  }
+  return <span className="h-2 w-2 shrink-0 rounded-full bg-malv-text/20" />;
 }
 
 export function TopBar(props: {
@@ -20,66 +43,81 @@ export function TopBar(props: {
   subtitle?: string;
   activity?: "live" | "processing" | "idle";
   right?: ReactNode;
+  /** Tighter row + typography (e.g. Explore routes). */
+  dense?: boolean;
+  /** No bottom rule — blends with page chrome. */
+  edgeless?: boolean;
 }) {
   const themeCtx = useContext(ThemeContext);
   if (!themeCtx) return null;
 
   const toggle = () => themeCtx.setTheme(themeCtx.theme === "dark" ? "light" : "dark");
   const activity = props.activity ?? "idle";
+  const isDark = themeCtx.theme === "dark";
+  const dense = Boolean(props.dense);
+  const edgeless = Boolean(props.edgeless);
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/[0.1] bg-surface-void/90 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-      <div className="relative overflow-hidden">
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand/50 to-transparent opacity-90"
-          aria-hidden
-        />
-        <div className="relative flex items-start sm:items-center justify-between gap-3 sm:gap-4 px-4 py-3 sm:py-3.5 max-w-[1600px] mx-auto w-full min-h-[3.25rem]">
-          <div className="flex min-w-0 flex-1 items-start gap-3 lg:hidden">
-            <LogoMark size={34} className="shrink-0 mt-0.5 text-malv-text/94" />
-            <div className="min-w-0 flex-1 pt-0.5">
-              <div className="font-display text-base font-bold tracking-tight text-malv-text truncate">MALV</div>
-              {props.title ? (
-                <div className="text-[11px] font-mono text-malv-muted truncate uppercase tracking-[0.14em] mt-0.5">{props.title}</div>
-              ) : null}
-            </div>
-            <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
-              <span className="text-[9px] font-mono uppercase tracking-wider text-malv-muted">{activityLabel(activity)}</span>
-              <ActivityIndicator mode={activity} />
-            </div>
-          </div>
-
-          <div className="hidden lg:flex min-w-0 flex-1 items-center gap-5">
-            <div className="min-w-0 border-l-[3px] border-brand pl-4 -ml-1">
-              {props.title ? (
-                <h1 className="font-display text-lg xl:text-xl font-bold tracking-tight text-malv-text truncate">{props.title}</h1>
+    <header
+      className={["sticky top-0 z-20", edgeless ? "" : "border-b"].join(" ")}
+      style={{
+        background: "rgb(var(--malv-canvas-rgb) / 0.9)",
+        borderColor: edgeless ? "transparent" : "rgb(var(--malv-border-rgb) / 0.08)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        transition: "background-color 220ms ease, border-color 220ms ease"
+      }}
+    >
+      <div
+        className={[
+          "relative mx-auto flex w-full max-w-[1600px] items-center justify-between gap-2",
+          dense ? "h-8 px-2.5" : "h-12 gap-3 px-4"
+        ].join(" ")}
+      >
+        <div className={["flex min-w-0 flex-1 items-center", dense ? "gap-1.5" : "gap-3"].join(" ")}>
+          <div className={["flex min-w-0 items-center", dense ? "gap-1" : "gap-2"].join(" ")}>
+            <ActivityDot mode={activity} />
+            <div className="min-w-0 leading-tight">
+              {dense ? (
+                <>
+                  <span className="block truncate text-[11px] font-semibold tracking-tight text-malv-text">
+                    {props.title ?? "MALV"}
+                  </span>
+                  {props.subtitle ? (
+                    <span className="mt-0.5 block truncate text-[9px] text-malv-text/38 sm:mt-0 sm:inline sm:ml-1 sm:text-[10px]">
+                      {props.subtitle}
+                    </span>
+                  ) : null}
+                </>
               ) : (
-                <h1 className="font-display text-lg xl:text-xl font-bold tracking-tight text-malv-text">Command surface</h1>
+                <div className="min-w-0">
+                  <span className="truncate text-[13px] font-semibold tracking-tight text-malv-text">
+                    {props.title ?? "MALV"}
+                  </span>
+                  {props.subtitle ? (
+                    <span className="hidden lg:inline lg:ml-2 text-[12px] text-malv-text/38 truncate">
+                      {props.subtitle}
+                    </span>
+                  ) : null}
+                </div>
               )}
-              {props.subtitle ? (
-                <p className="text-sm text-malv-muted mt-1 max-w-2xl leading-relaxed line-clamp-2">{props.subtitle}</p>
-              ) : null}
-            </div>
-            <div className="ml-auto flex items-center gap-3 shrink-0">
-              <div className="hidden xl:flex flex-col items-end gap-0.5 pr-1">
-                <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-brand">Runtime</span>
-                <span className="text-[11px] font-mono text-malv-muted">{activityLabel(activity)}</span>
-              </div>
-              <ActivityIndicator mode={activity} />
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2 shrink-0 lg:ml-0">
-            {props.right}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={toggle}
-              className="!px-3 !py-2 text-[10px] font-mono uppercase tracking-[0.15em]"
-            >
-              {themeCtx.theme === "dark" ? "Day" : "Night"}
-            </Button>
-          </div>
+        <div className={["flex shrink-0 items-center", dense ? "gap-1" : "gap-1.5"].join(" ")}>
+          {props.right}
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            className={[
+              "flex items-center justify-center rounded-md text-malv-text/50 transition-colors hover:bg-malv-text/[0.06] hover:text-malv-text/80 focus-visible:outline-none",
+              dense ? "h-7 w-7" : "h-8 w-8 rounded-lg"
+            ].join(" ")}
+          >
+            {isDark ? <SunIcon /> : <MoonIcon />}
+          </button>
         </div>
       </div>
     </header>

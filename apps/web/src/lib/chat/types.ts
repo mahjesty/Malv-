@@ -10,16 +10,24 @@ export type MessageRole = "user" | "assistant" | "system";
 export type MessageStatus =
   | "pending"
   | "sent"
+  /**
+   * Assistant row inserted optimistically before the first visible stream paint.
+   * Not “streaming” yet — no reply bytes have been committed to the visible buffer.
+   */
+  | "preparing"
   | "thinking"
   | "streaming"
   | "done"
   | "error"
   /** User stopped generation; partial content retained */
-  | "interrupted";
+  | "interrupted"
+  /** Model stream ended abnormally after at least one token was shown */
+  | "partial_done";
 
 export type MalvEventType =
   | "assistant_delta"
   | "assistant_done"
+  | "thinking_state"
   | "thinking"
   | "planning"
   | "memory_context"
@@ -38,7 +46,13 @@ export type MalvActivityPhase =
   | "planning_next_step"
   | "accessing_memory"
   | "secure_operator"
-  | "reasoning_chain";
+  | "reasoning_chain"
+  | "super_fix_execute"
+  /** Beast phased orchestration steps (`server_phase:<InternalPhaseId>`). */
+  | MalvServerOrchestrationActivityPhase;
+
+/** Emitted by Beast as `server_phase:${InternalPhaseId}` (see phased-chat orchestration). */
+export type MalvServerOrchestrationActivityPhase = `server_phase:${string}`;
 
 export interface ChatAttachmentRef {
   id: string;
@@ -56,6 +70,10 @@ export interface MalvChatMessage {
   createdAt: number;
   status: MessageStatus;
   attachments?: ChatAttachmentRef[];
+  /**
+   * Extension fields (e.g. `malvStreamCanonicalActive`: first `assistant_delta` received this turn —
+   * combined with raw `content` length so whitespace-only stream starts are not treated as empty).
+   */
   metadata?: Record<string, unknown>;
   /**
    * Workspace runtime session (chat / studio / task). When set with hasRuntimeDetail, the transcript
@@ -74,7 +92,7 @@ export interface MalvChatMessage {
   source?: "local" | "malv_socket" | "malv_http" | "malv_job" | "mock";
   /** Last orchestration event that touched this message */
   eventType?: MalvEventType;
-  /** When status is thinking/streaming, optional fine-grained activity */
+  /** When status is preparing/thinking/streaming, optional fine-grained activity */
   activityPhase?: MalvActivityPhase;
   errorMessage?: string;
   /**
@@ -103,6 +121,19 @@ export type MalvOrchestrationEvent =
       finalContent?: string;
       /** Present when user stopped or worker aborted mid-turn */
       terminal?: "interrupted" | "completed";
+      /** Server-authoritative turn outcome (WS path). */
+      malvTurnOutcome?: "complete" | "partial_done" | "failed_before_output";
+      /**
+       * Allowlisted rich-rendering fields mirrored from assistant DB meta (WS + HTTP completion).
+       * Older servers omit this key entirely.
+       */
+      assistantMeta?: Record<string, unknown>;
+    }
+  | {
+      type: "thinking_state";
+      conversationId?: string | null;
+      messageId?: string;
+      steps: string[];
     }
   | {
       type: "memory_context";
@@ -187,6 +218,11 @@ export interface MalvSendPayload {
   inputMode?: "text" | "voice" | "video";
   /** Phase 5 — merged with text-derived tone on the API (see Workspace mood strip). */
   userMoodHint?: MalvUserMoodHint;
+  /**
+   * Explore → Chat canonical handoff JSON (v1). Server-only; never shown in user-visible chat chrome.
+   * Cleared after the first successful send that attaches it.
+   */
+  exploreHandoffJson?: string | null;
 }
 
 export interface MalvChatClientConfig {

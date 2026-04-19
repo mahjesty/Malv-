@@ -37,7 +37,7 @@ export function VoiceActionButton(props: {
       onPointerCancel={pressMode ? onPointerUp : undefined}
       onPointerLeave={pressMode ? onPointerLeave : undefined}
       aria-label="Voice assistant"
-      className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full sm:h-8 sm:w-8"
+      className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full sm:h-9 sm:w-9"
       style={{
         background:
           "radial-gradient(120% 120% at 30% 18%, oklch(0.25 0.05 235 / 0.35), transparent 56%), oklch(0.12 0.02 260 / 0.92)",

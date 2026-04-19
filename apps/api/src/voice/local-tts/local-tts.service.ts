@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { VoiceCatalogService } from "../voice-catalog.service";
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +48,7 @@ async function execWithStdin(args: { cmd: string; argv: string[]; stdinText: str
 
 @Injectable()
 export class LocalTtsService {
+  constructor(private readonly voiceCatalog: VoiceCatalogService) {}
   /**
    * Fully self-hosted TTS.
    *
@@ -54,7 +57,7 @@ export class LocalTtsService {
    * - `PIPER_BIN=/path/to/piper`
    * - `PIPER_MODEL=/path/to/voice.onnx`
    */
-  async synthesize(args: { text: string }): Promise<{ wavBytes: Buffer }> {
+  async synthesize(args: { text: string; voiceId?: string | null }): Promise<{ wavBytes: Buffer; voiceId: string }> {
     const provider = (process.env.MALV_LOCAL_TTS_PROVIDER ?? "piper").toLowerCase();
     if (provider !== "piper") {
       throw new Error(`Unsupported MALV_LOCAL_TTS_PROVIDER=${provider} (supported: piper)`);
@@ -62,12 +65,21 @@ export class LocalTtsService {
     const text = (args.text ?? "").trim();
     if (!text) throw new Error("Empty TTS text");
 
-    const sessionId = crypto.randomUUID();
+    const sessionId = randomUUID();
     const dir = await fs.mkdtemp(join(tmpdir(), `malv-tts-${sessionId}-`));
     const outPath = join(dir, "out.wav");
     try {
       const bin = requireEnv("PIPER_BIN");
-      const model = requireEnv("PIPER_MODEL");
+      let model: string;
+      let usedVoiceId: string;
+      try {
+        const v = this.voiceCatalog.resolvePiperVoice(args.voiceId ?? null);
+        model = v.modelPath;
+        usedVoiceId = v.voiceId;
+      } catch {
+        model = requireEnv("PIPER_MODEL");
+        usedVoiceId = "legacy-env";
+      }
 
       // Piper reads text from stdin and writes wav to output file.
       await execWithStdin({
@@ -78,7 +90,7 @@ export class LocalTtsService {
       });
 
       const wavBytes = await fs.readFile(outPath);
-      return { wavBytes };
+      return { wavBytes, voiceId: usedVoiceId };
     } finally {
       try {
         await fs.rm(dir, { recursive: true, force: true });

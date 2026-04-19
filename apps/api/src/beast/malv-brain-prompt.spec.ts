@@ -2,14 +2,80 @@ import {
   buildMalvChatPrompt,
   MALV_CORE_SYSTEM_PROMPT,
   MALV_IDENTITY_LOCK,
+  MALV_SYSTEM_ROLE_PROMPT,
+  splitMalvChatPromptForOpenAiCompatibleChat,
   summarizeMalvPromptStructure
 } from "./malv-brain-prompt";
 
 describe("MALV brain prompt", () => {
+  it("economy prompt effort stays shorter than standard while keeping identity lock", () => {
+    const baseArgs = {
+      userMessage: "status check",
+      contextBlock: "ctx",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "analyze" as const,
+      attachSecuritySoftwareHygiene: false
+    };
+    const standard = buildMalvChatPrompt({ ...baseArgs, promptEffort: "standard" });
+    const economy = buildMalvChatPrompt({ ...baseArgs, promptEffort: "economy" });
+    expect(economy.length).toBeLessThan(standard.length);
+    expect(economy).toMatch(/forbidden identities|"I am Qwen"/i);
+  });
+
   it("includes the identity lock in the exported core prompt", () => {
     expect(MALV_CORE_SYSTEM_PROMPT).toContain("MALV");
-    expect(MALV_CORE_SYSTEM_PROMPT).toContain("Never call yourself Qwen");
+    expect(MALV_CORE_SYSTEM_PROMPT).toMatch(/forbidden identities|"I am Qwen"/i);
     expect(MALV_IDENTITY_LOCK).toContain("Alibaba");
+  });
+
+  it("adds compact multi-intent shaping when the user bundles multiple asks", () => {
+    const prompt = buildMalvChatPrompt({
+      userMessage: "who made you and what can you do",
+      contextBlock: "",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "analyze"
+    });
+    expect(prompt).toContain("### Multi-part message");
+    expect(prompt).toMatch(/Also:/i);
+    expect(prompt).toContain("### Intent-first answering");
+  });
+
+  it("embeds intent-first answering block derived from the user message", () => {
+    const factual = buildMalvChatPrompt({
+      userMessage: "what is 2+2",
+      contextBlock: "test ctx",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "analyze"
+    });
+    expect(factual).toContain("### Intent-first answering");
+    expect(factual).toContain("factual");
+
+    const yes = buildMalvChatPrompt({
+      userMessage: "is delta state clean",
+      contextBlock: "",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "analyze",
+      questionAnswerShape: "yes_no"
+    });
+    expect(yes).toContain("yes_no");
+    expect(yes).toMatch(/first sentence/i);
+  });
+
+  it("includes internal response plan block when provided", () => {
+    const prompt = buildMalvChatPrompt({
+      userMessage: "Explain closures",
+      contextBlock: "",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "analyze",
+      responsePlanBlock: "### Response plan (internal)\nresponseType: explanatory"
+    });
+    expect(prompt).toContain("### Response plan (internal)");
+    expect(prompt).toContain("responseType: explanatory");
   });
 
   it("buildMalvChatPrompt includes MALV base and identity rules", () => {
@@ -20,13 +86,24 @@ describe("MALV brain prompt", () => {
       classifiedMode: "light",
       modeType: "analyze"
     });
+    expect(prompt).toMatch(/relationship to them|identity or what you do/i);
     expect(prompt).toContain("### [system] MALV base");
     expect(prompt).toContain("### [system] Mode");
     expect(prompt).toContain("### [system] Context summary");
     expect(prompt).toContain("### [user] Message");
     expect(prompt).toContain("what is 2+2");
-    expect(prompt).toContain("Never call yourself Qwen");
+    expect(prompt).toMatch(/forbidden identities|"I am Qwen"/i);
     expect(prompt).toContain("least privilege");
+
+    const slim = buildMalvChatPrompt({
+      userMessage: "what is 2+2",
+      contextBlock: "test ctx",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "analyze",
+      attachSecuritySoftwareHygiene: false
+    });
+    expect(slim).not.toContain("least privilege");
 
     const summary = summarizeMalvPromptStructure(prompt);
     expect(summary.hasMalvBaseSection).toBe(true);
@@ -89,8 +166,8 @@ describe("MALV brain prompt", () => {
       isFirstThreadTurn: true,
       userTone: "casual"
     });
-    expect(prompt).toContain("First turn in this thread");
-    expect(prompt).toContain("Thread tone: User reads casual");
+    expect(prompt).toContain("First message in this thread");
+    expect(prompt).toContain("They sound casual");
   });
 
   it("includes autonomous orchestration directives when provided", () => {
@@ -104,5 +181,20 @@ describe("MALV brain prompt", () => {
     });
     expect(prompt).toContain("### Autonomous orchestration directives");
     expect(prompt).toContain("full_product_build");
+  });
+
+  it("splitMalvChatPromptForOpenAiCompatibleChat separates system instructions from final user content", () => {
+    const prompt = buildMalvChatPrompt({
+      userMessage: "hello, who are you?",
+      contextBlock: "ctx",
+      beastLevel: "Smart",
+      classifiedMode: "light",
+      modeType: "explain"
+    });
+    const split = splitMalvChatPromptForOpenAiCompatibleChat(prompt, MALV_SYSTEM_ROLE_PROMPT);
+    expect(split.finalUserContent).toContain("hello, who are you?");
+    expect(split.systemInstructions).toContain(MALV_SYSTEM_ROLE_PROMPT.slice(0, 40));
+    expect(split.systemInstructions).toContain("### [system] MALV base");
+    expect(split.systemInstructions).not.toContain("hello, who are you?");
   });
 });

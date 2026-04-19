@@ -32,7 +32,9 @@ def _normalize_backend(name: Optional[str]) -> Optional[InferenceBackendName]:
     if not name:
         return None
     n = name.strip().lower()
-    if n in ("ollama", "llamacpp", "transformers", "openai_compatible", "vllm", "fallback"):
+    if n in ("dev_fast", "cpu_fallback"):
+        return "lightweight_local"
+    if n in ("ollama", "llamacpp", "transformers", "openai_compatible", "vllm", "fallback", "lightweight_local"):
         return "openai_compatible" if n == "vllm" else n  # type: ignore[return-value]
     return None
 
@@ -81,6 +83,7 @@ class InferenceRouter:
         self._providers: Dict[str, Any] = {}
         self._chain_order: List[str] = []
         self._build_providers_and_chain()
+        self._ensure_lightweight_sidecar()
 
         _log.info(
             "[MALV ROUTER] boot primary=%s chain=%s fallback_enabled=%s transformers_path=%s ollama_base=%s llamacpp_base=%s openai_compat_base=%s",
@@ -109,7 +112,17 @@ class InferenceRouter:
                     "[MALV ROUTER] skip openai_compatible — set MALV_OPENAI_COMPAT_BASE_URL (remote OpenAI-compatible API, e.g. vLLM)"
                 )
                 return None
-            return OpenAiCompatibleInferenceProvider(self.settings)
+            return OpenAiCompatibleInferenceProvider(self.settings, slot="primary")
+        if name == "lightweight_local":
+            if not self.settings.lightweight_inference_enabled:
+                _log.warning("[MALV ROUTER] skip lightweight_local — MALV_LIGHTWEIGHT_INFERENCE_ENABLED is off or URL/model missing")
+                return None
+            if not (self.settings.lightweight_openai_compat_base_url or "").strip() or not (
+                self.settings.lightweight_inference_model or ""
+            ).strip():
+                _log.warning("[MALV ROUTER] skip lightweight_local — set MALV_LIGHTWEIGHT_OPENAI_COMPAT_BASE_URL and MALV_LIGHTWEIGHT_INFERENCE_MODEL")
+                return None
+            return OpenAiCompatibleInferenceProvider(self.settings, slot="lightweight")
         if name == "fallback":
             return FallbackInferenceProvider(self.settings)
         return None
@@ -150,13 +163,22 @@ class InferenceRouter:
             self._chain_order = ["fallback"]
             _log.warning("[MALV ROUTER] no backends instantiated — using fallback only")
 
+    def _ensure_lightweight_sidecar(self) -> None:
+        """Register lightweight_local for per-request routing even when it is not in the failover chain."""
+        if "lightweight_local" in self._providers:
+            return
+        p = self._instantiate("lightweight_local")
+        if p is not None:
+            self._providers["lightweight_local"] = p
+            _log.info("[MALV ROUTER] lightweight_local registered as sidecar (not in default chain)")
+
     def _select_chain(self, context: dict[str, Any]) -> List[Tuple[str, Any]]:
         override = _normalize_backend(_ctx_str(context, "malvInferenceBackend", "inferenceBackend"))
         if not override:
             return [(n, self._providers[n]) for n in self._chain_order if n in self._providers]
 
         if override not in self._providers:
-            _log.warning("[MALV ROUTER] requested backend %s not in active chain — using default chain", override)
+            _log.warning("[MALV ROUTER] requested backend %s not available — using default chain", override)
             return [(n, self._providers[n]) for n in self._chain_order if n in self._providers]
 
         rest = [n for n in self._chain_order if n != override]
@@ -695,6 +717,21 @@ class InferenceRouter:
             if not h.get("ok"):
                 return "openai_compatible_health_not_ok"
             return ""
+        if name == "lightweight_local":
+            if h.get("pathMisconfigured"):
+                return "lightweight_openai_compat_path_invalid_check_MALV_LIGHTWEIGHT_OPENAI_COMPAT_BASE_URL"
+            err = h.get("error")
+            if err:
+                return str(err)
+            if not h.get("reachable"):
+                return "lightweight_unreachable_check_MALV_LIGHTWEIGHT_OPENAI_COMPAT_BASE_URL"
+            if not h.get("modelConfigured"):
+                return "MALV_LIGHTWEIGHT_INFERENCE_MODEL_not_set"
+            if not h.get("modelListed"):
+                return "lightweight_model_not_listed_on_remote_GET_v1_models"
+            if not h.get("ok"):
+                return "lightweight_health_not_ok"
+            return ""
         return str(h.get("error") or "unknown_backend_state")
 
     async def _primary_is_ready_for_policy(self) -> bool:
@@ -744,6 +781,10 @@ class InferenceRouter:
             if h.get("pathMisconfigured"):
                 return False
             return bool(h.get("ok") and h.get("reachable") and h.get("modelListed"))
+        if primary == "lightweight_local":
+            if h.get("pathMisconfigured"):
+                return False
+            return bool(h.get("ok") and h.get("reachable") and h.get("modelListed"))
 
         return False
 
@@ -788,7 +829,22 @@ class InferenceRouter:
             if note:
                 backend_notes[name] = note
 
-        inference_configured = primary in ("ollama", "llamacpp", "transformers", "openai_compatible", "fallback")
+        for name in self._providers.keys():
+            if name in per:
+                continue
+            p = self._providers.get(name)
+            if not p:
+                continue
+            try:
+                h = await p.health()
+            except Exception as e:
+                h = {"ok": False, "error": str(e), "backend": name}
+            per[name] = h
+            note = self._explain_backend_health(name, h)
+            if note:
+                backend_notes[name] = note
+
+        inference_configured = primary in ("ollama", "llamacpp", "transformers", "openai_compatible", "fallback", "lightweight_local")
 
         ph = per.get(primary) or {}
         primary_skip = ""
@@ -813,6 +869,10 @@ class InferenceRouter:
             streaming_supported = bool(ph.get("streamingSupported")) and inference_ready
         elif primary == "openai_compatible":
             primary_skip = self._explain_backend_health("openai_compatible", ph)
+            inference_ready = not primary_skip and bool(ph.get("ok") and ph.get("reachable") and ph.get("modelListed"))
+            streaming_supported = bool(ph.get("streamingSupported")) and inference_ready
+        elif primary == "lightweight_local":
+            primary_skip = self._explain_backend_health("lightweight_local", ph)
             inference_ready = not primary_skip and bool(ph.get("ok") and ph.get("reachable") and ph.get("modelListed"))
             streaming_supported = bool(ph.get("streamingSupported")) and inference_ready
 
@@ -848,7 +908,10 @@ class InferenceRouter:
             "backendNotes": backend_notes,
             "providers": per,
             "chain": self._chain_order,
-            "selectedModel": self.settings.inference_model,
+            "selectedModel": self.settings.lightweight_inference_model
+            if primary == "lightweight_local"
+            else self.settings.inference_model,
+            "lightweightLocalConfigured": bool("lightweight_local" in self._providers),
             "inferenceTelemetry": inference_telemetry.snapshot(),
             "effectiveBackend": primary if inference_ready else ("fallback" if fallback_active_now else None),
         }

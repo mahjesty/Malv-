@@ -3,10 +3,27 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import type { INestApplication } from "@nestjs/common";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { AppModule } from "./app.module";
 import { ObservabilityService } from "./common/observability.service";
-import { validateProductionSecurityOrThrow, validateProductionSecretsGroupsOrThrow } from "./common/production-config-validation";
+import {
+  resolveMalvDeploymentModeFromEnv,
+  validateDistributedSafetyOrThrow,
+  validateProductionSecurityOrThrow,
+  validateProductionSecretsGroupsOrThrow
+} from "./common/production-config-validation";
+import { MalvRedisIoAdapter } from "./realtime/malv-redis-io.adapter";
+import {
+  resolveMalvLocalInferenceBaseUrl,
+  validateMalvInferenceBaseUrlsFromProcessEnv
+} from "./inference/malv-inference-base-urls.util";
+import {
+  malvGpuTierEnabledFromEnv,
+  malvGpuTierProbeWorkerHealthFromEnv,
+  malvLocalInferenceChatPathBlockedFromEnv
+} from "./inference/malv-chat-tier-availability.util";
+import { malvEnvFirst, MALV_LOCAL_CPU_INFERENCE_ENV, MALV_PRIMARY_INFERENCE_ENV } from "./inference/malv-inference-env.util";
 
 export { validateProductionSecurityOrThrow, validateSandboxIsolationConfigOrThrow } from "./common/production-config-validation";
 
@@ -48,25 +65,78 @@ async function listenWithPortFallback(
   }
 }
 
+function envTruthy(raw: string | undefined, defaultWhenEmpty: boolean): boolean {
+  if (raw == null || raw === "") return defaultWhenEmpty;
+  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
 function logApiInferenceEnvSnapshot(): void {
   const log = new Logger("MalvInferenceEnv");
-  const rawBase = process.env.MALV_OPENAI_COMPAT_BASE_URL ?? "";
+  const get = (k: string) => process.env[k];
+  const primaryBaseRaw =
+    malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.BASE_URL) ?? malvEnvFirst(get, ["MALV_OPENAI_COMPAT_BASE_URL"]) ?? "";
   const resolvedV1 =
-    rawBase.trim().length === 0
+    primaryBaseRaw.trim().length === 0
       ? null
-      : rawBase.replace(/\/+$/, "").toLowerCase().endsWith("/v1")
-        ? rawBase.replace(/\/+$/, "")
-        : `${rawBase.replace(/\/+$/, "")}/v1`;
+      : primaryBaseRaw.replace(/\/+$/, "").toLowerCase().endsWith("/v1")
+        ? primaryBaseRaw.replace(/\/+$/, "")
+        : `${primaryBaseRaw.replace(/\/+$/, "")}/v1`;
+  const rawWorker = (process.env.BEAST_WORKER_BASE_URL ?? "").trim();
+  const rawLocalCpuBaseMalv = (process.env.MALV_LOCAL_CPU_INFERENCE_BASE_URL ?? "").trim();
+  const rawLocalCpuBaseLegacy = (process.env.MALV_LOCAL_INFERENCE_BASE_URL ?? "").trim();
+  const localInferenceEnabled = envTruthy(malvEnvFirst(get, MALV_LOCAL_CPU_INFERENCE_ENV.ENABLED), false);
+  const localInferenceChatPathBlocked = malvLocalInferenceChatPathBlockedFromEnv(get);
+  const localInferenceEffectiveBase = resolveMalvLocalInferenceBaseUrl(get);
+  const localModel = (malvEnvFirst(get, MALV_LOCAL_CPU_INFERENCE_ENV.MODEL) ?? "").trim();
+  const gpuTierEnabled = malvGpuTierEnabledFromEnv(get);
+  const gpuHealthProbeEnabled = malvGpuTierProbeWorkerHealthFromEnv(get);
+  const primaryInferenceModel = malvEnvFirst(get, MALV_PRIMARY_INFERENCE_ENV.MODEL) ?? "";
+
   log.log(
     JSON.stringify({
       tag: "MALV_API_INFERENCE_ENV",
       envFiles: "repo root .env then apps/api/.env (see src/envload.ts)",
+      process_note:
+        "Primary inference for chat is configured with MALV_INFERENCE_* (preferred), then legacy INFERENCE_* / MALV_OPENAI_COMPAT_* / MALV_INFERENCE_BACKEND. Beast-worker reads effective config from the API. Local CPU llama on the API host uses MALV_LOCAL_CPU_INFERENCE_* (legacy MALV_LOCAL_INFERENCE_*).",
+      BEAST_WORKER_BASE_URL_raw: rawWorker || null,
+      MALV_LOCAL_CPU_INFERENCE_BASE_URL_raw: rawLocalCpuBaseMalv || null,
+      MALV_LOCAL_INFERENCE_BASE_URL_raw: rawLocalCpuBaseLegacy || null,
+      MALV_LOCAL_CPU_INFERENCE_ENABLED_raw: process.env.MALV_LOCAL_CPU_INFERENCE_ENABLED ?? null,
+      MALV_LOCAL_INFERENCE_ENABLED_raw: process.env.MALV_LOCAL_INFERENCE_ENABLED ?? null,
+      malv_local_cpu_inference_enabled_effective: localInferenceEnabled,
+      MALV_LOCAL_CPU_INFERENCE_DISABLE_CHAT_PATH_raw: process.env.MALV_LOCAL_CPU_INFERENCE_DISABLE_CHAT_PATH ?? null,
+      MALV_LOCAL_INFERENCE_DISABLE_CHAT_PATH_raw: process.env.MALV_LOCAL_INFERENCE_DISABLE_CHAT_PATH ?? null,
+      malv_local_inference_chat_path_blocked_effective: localInferenceChatPathBlocked,
+      malv_local_cpu_inference_effective_base_url: localInferenceEffectiveBase,
+      MALV_LOCAL_CPU_INFERENCE_MODEL: localModel || null,
+      MALV_GPU_TIER_ENABLED_raw: process.env.MALV_GPU_TIER_ENABLED ?? null,
+      malv_gpu_tier_enabled_effective: gpuTierEnabled,
+      MALV_GPU_TIER_PROBE_WORKER_HEALTH: process.env.MALV_GPU_TIER_PROBE_WORKER_HEALTH ?? null,
+      malv_gpu_tier_probe_worker_health_effective: gpuHealthProbeEnabled,
+      MALV_LIGHTWEIGHT_INFERENCE_ENABLED: process.env.MALV_LIGHTWEIGHT_INFERENCE_ENABLED ?? null,
+      MALV_INFERENCE_PROVIDER_raw: process.env.MALV_INFERENCE_PROVIDER ?? null,
+      INFERENCE_BACKEND: process.env.INFERENCE_BACKEND ?? null,
       MALV_INFERENCE_BACKEND: process.env.MALV_INFERENCE_BACKEND ?? null,
-      MALV_OPENAI_COMPAT_BASE_URL_raw: rawBase || null,
-      MALV_OPENAI_COMPAT_API_ROOT_resolved_like_worker: resolvedV1,
-      MALV_INFERENCE_MODEL: process.env.MALV_INFERENCE_MODEL ?? null,
-      note: "Chat inference is executed by beast-worker; values must match the worker process (restart worker after .env edits)."
+      MALV_INFERENCE_BASE_URL_raw: malvEnvFirst(get, ["MALV_INFERENCE_BASE_URL"]) || null,
+      INFERENCE_BASE_URL_raw: process.env.INFERENCE_BASE_URL ?? null,
+      MALV_OPENAI_COMPAT_BASE_URL_raw: malvEnvFirst(get, ["MALV_OPENAI_COMPAT_BASE_URL"]) || null,
+      openai_compatible_api_root_resolved_like_worker: resolvedV1,
+      MALV_INFERENCE_MODEL_raw: process.env.MALV_INFERENCE_MODEL ?? null,
+      MALV_INFERENCE_PRIMARY_AUTHORITY: process.env.MALV_INFERENCE_PRIMARY_AUTHORITY ?? null,
+      INFERENCE_MODEL_raw: process.env.INFERENCE_MODEL ?? null,
+      note:
+        "Set MALV_LOCAL_CPU_INFERENCE_DISABLE_CHAT_PATH=true (or legacy MALV_LOCAL_INFERENCE_DISABLE_CHAT_PATH) to forbid API→local-CPU llama for chat. BEAST_WORKER_BASE_URL must not equal the local CPU llama base."
     })
+  );
+
+  log.log(
+    `[MalvInferenceEnv] summary: api_local_cpu_inference=${localInferenceEnabled ? "ENABLED" : "disabled"} ` +
+      `local_cpu_chat_path_blocked=${localInferenceChatPathBlocked ? "yes" : "no"} ` +
+      `local_cpu_base_url=${localInferenceEffectiveBase} ` +
+      `local_cpu_model=${localModel || "(unset — server default)"} ` +
+      `gpu_tier=${gpuTierEnabled ? "ENABLED" : "disabled"} ` +
+      `gpu_health_probe=${gpuHealthProbeEnabled ? "on" : "off"} ` +
+      `primary_inference_model=${primaryInferenceModel || "(unset)"}`
   );
 }
 
@@ -100,6 +170,9 @@ function logProductionReadinessSnapshot(): void {
       vaultMasterKeyConfigured: Boolean((process.env.MALV_VAULT_MASTER_KEY ?? "").trim()),
       rateLimitRedisConfigured: Boolean(((process.env.REDIS_RATE_LIMIT_URL ?? process.env.REDIS_URL) ?? "").trim()),
       uploadHandleLegacyFallbackEnabled: storageLegacyRegisterEnabled,
+      deploymentMode: resolveMalvDeploymentModeFromEnv(process.env),
+      realtimeEnabled: (process.env.MALV_REALTIME_ENABLED ?? "true").toLowerCase() !== "false",
+      backgroundWorkloadsEnabled: (process.env.MALV_BACKGROUND_WORKLOADS_ENABLED ?? "true").toLowerCase() !== "false",
       migrations: {
         synchronize: false,
         migrationsRun: false,
@@ -116,6 +189,7 @@ function logProductionReadinessSnapshot(): void {
 }
 
 async function bootstrap() {
+  validateMalvInferenceBaseUrlsFromProcessEnv(process.env);
   logApiInferenceEnvSnapshot();
   logProductionReadinessSnapshot();
   const isProd = (process.env.NODE_ENV ?? "").toLowerCase() === "production";
@@ -125,7 +199,13 @@ async function bootstrap() {
     .filter(Boolean);
   validateProductionSecurityOrThrow({ isProd, corsOrigins });
   validateProductionSecretsGroupsOrThrow({ isProd });
-  const app = await NestFactory.create(AppModule);
+  validateDistributedSafetyOrThrow({ isProd, env: process.env });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const wsAdapter = new MalvRedisIoAdapter(app);
+  await wsAdapter.connectToRedis();
+  app.useWebSocketAdapter(wsAdapter);
+  /** Safety net for inline data URLs; large sources should use staged `sourceImageFileId`. */
+  app.useBodyParser("json", { limit: "12mb" });
   const observability = app.get(ObservabilityService);
   observability.logMonitoringHints();
 

@@ -16,6 +16,7 @@
     "test:mysql:integration": "MALV_RUN_MYSQL_INTEGRATION=1 jest malv-infra.mysql.integration --runInBand --testTimeout=180000"
   },
   "dependencies": {
+    "@malv/explore-action-handoff": "*",
     "@nestjs/common": "^10.4.12",
     "@nestjs/config": "^3.2.3",
     "@nestjs/core": "^10.4.12",
@@ -25,11 +26,14 @@
     "@nestjs/platform-socket.io": "^10.4.12",
     "@nestjs/typeorm": "^10.0.2",
     "@nestjs/websockets": "^10.3.10",
+    "@socket.io/redis-adapter": "^8.3.0",
     "@types/multer": "^2.1.0",
+    "adm-zip": "^0.5.16",
     "bcrypt": "^5.1.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "dotenv": "^16.4.7",
+    "esbuild": "^0.21.5",
     "image-size": "^2.0.2",
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.2",

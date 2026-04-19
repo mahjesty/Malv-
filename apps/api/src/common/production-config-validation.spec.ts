@@ -2,6 +2,7 @@ import {
   buildRedactedEnvSnapshot,
   looksLikePlaceholderSecret,
   redactEnvValue,
+  validateDistributedSafetyOrThrow,
   validateProductionSecretsGroupsOrThrow,
   validateProductionSecurityOrThrow
 } from "./production-config-validation";
@@ -62,5 +63,19 @@ describe("production-config-validation", () => {
         corsOrigins: ["https://app.example.com"]
       })
     ).not.toThrow();
+  });
+
+  it("fails multi-instance safety when distributed prerequisites are missing", () => {
+    process.env.MALV_DEPLOYMENT_MODE = "multi_instance";
+    process.env.REDIS_COORDINATION_URL = "";
+    process.env.REDIS_URL = "";
+    process.env.REDIS_SOCKET_IO_ADAPTER_URL = "";
+    process.env.MALV_STORAGE_BACKEND = "local_private";
+    process.env.MALV_SHARED_FILESYSTEM_CONFIRMED = "false";
+    process.env.BEAST_WORKER_BASE_URL = "";
+    process.env.BEAST_WORKER_BASE_URLS = "";
+    expect(() => validateDistributedSafetyOrThrow({ isProd: true, env: process.env })).toThrow(
+      /Distributed deployment validation failed/
+    );
   });
 });

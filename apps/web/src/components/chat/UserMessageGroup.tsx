@@ -15,7 +15,7 @@ export function UserMessageGroup({ children, className, ...motionProps }: UserMe
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       className={[
-        "ml-auto inline-flex max-w-[min(100%,70%)] flex-col items-end gap-2 text-right",
+        "ml-auto flex w-full flex-col items-end gap-2 text-right",
         className ?? ""
       ]
         .filter(Boolean)

@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { ConflictPolicyService } from "./conflict-policy.service";
 import { MetaIntelligenceRouterService } from "./meta-intelligence-router.service";
 import { ResponsePolicyService } from "./response-policy.service";
@@ -26,8 +26,10 @@ import { ExternalExecutionService } from "./layers/external-execution.service";
 import { ContinuityIntelligenceService } from "./layers/continuity-intelligence.service";
 import { ConfidenceEngineService } from "./confidence-engine.service";
 import { ContinuityBridgeService } from "./continuity-bridge.service";
+import { ExecutionBridgeModule } from "../execution-bridge/execution-bridge.module";
 
 @Module({
+  imports: [forwardRef(() => ExecutionBridgeModule)],
   providers: [
     MetaIntelligenceRouterService,
     ConflictPolicyService,

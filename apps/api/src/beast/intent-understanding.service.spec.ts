@@ -35,6 +35,56 @@ describe("IntentUnderstandingService", () => {
     expect(c.ambiguity.reason).toBe("message_too_vague");
   });
 
+  it("does not force clarification for short knowledge questions (question mark)", () => {
+    const c = svc.classify("whats cryptio?");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not force clarification for short explain-style prompts", () => {
+    const c = svc.classify("explain tides");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not force clarification for broad step-by-step explain requests", () => {
+    const c = svc.classify("explain something complex step by step and be detailed");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not force clarification for teach-me-open-ended prompts", () => {
+    const c = svc.classify("teach me something interesting");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not trap permissive replies after low-signal classification", () => {
+    const c = svc.classify("anything");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("still requires clarification for bare vague help", () => {
+    const c = svc.classify("help");
+    expect(c.ambiguity.isAmbiguous).toBe(true);
+  });
+
+  it("does not force clarification for explicit debug/reasoning prompts", () => {
+    const c = svc.classify("do a deep thinking so we can debug");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not force clarification for 'debug this' style requests", () => {
+    const c = svc.classify("debug the auth flow");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not force clarification for 'think through' style requests", () => {
+    const c = svc.classify("think through the problem with me");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
+  it("does not force clarification for 'analyze this' requests", () => {
+    const c = svc.classify("analyze this and let me know");
+    expect(c.ambiguity.isAmbiguous).toBe(false);
+  });
+
   it("exposes deterministic scores for audit", () => {
     const c = svc.classify("upgrade our k8s cluster and bump node version");
     expect(c.scores.system_upgrade).toBeGreaterThanOrEqual(4);

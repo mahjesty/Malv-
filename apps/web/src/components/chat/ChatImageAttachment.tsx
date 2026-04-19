@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Maximize2, X } from "lucide-react";
 import type { ChatAttachmentRef } from "@/lib/chat/types";
 import { formatFileSize } from "@/lib/chat/chatAttachmentUtils";
+import { lockBodyScroll } from "@/lib/ui/bodyScrollLock";
 
 export type ChatImageAttachmentLayout = "featured" | "grid";
 
@@ -34,11 +35,10 @@ export function ChatImageAttachment({
   useEffect(() => {
     if (!lightboxOpen) return;
     window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const releaseScroll = lockBodyScroll();
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      releaseScroll();
     };
   }, [lightboxOpen, onKey]);
 

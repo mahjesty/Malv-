@@ -4,11 +4,27 @@ import { useAuth } from "../../lib/auth/AuthContext";
 import { createCall, patchCallState } from "../../lib/api/dataPlane";
 import { setMalvVaultSessionId } from "../../lib/malvOperatorPrefs";
 import { createMalvSocket } from "../../lib/realtime/socket";
-import { StatusChip } from "@malv/ui";
 import { CallPresenceStage, type CallPhase } from "../../components/call/CallPresenceStage";
 import { MobileSidebarTrigger } from "../../components/navigation/MobileSidebarTrigger";
 
 const UUID_V4ISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function PhaseIndicator({ phase }: { phase: CallPhase }) {
+  if (phase === "active") {
+    return (
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+      </span>
+    );
+  }
+  if (phase === "creating") {
+    return (
+      <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400/70 animate-pulse-soft" />
+    );
+  }
+  return <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "rgb(var(--malv-muted-rgb) / 0.3)" }} />;
+}
 
 export function VideoCallPage() {
   const { accessToken } = useAuth();
@@ -18,7 +34,6 @@ export function VideoCallPage() {
     const raw = searchParams.get("conversationId") ?? searchParams.get("conversation");
     return raw && UUID_V4ISH.test(raw) ? raw : undefined;
   }, [searchParams]);
-  /** Blueprint: group / collaboration sessions use a tighter presence policy (avatar switching restricted in UI). */
   const participationScope = useMemo(() => {
     const raw = (searchParams.get("scope") ?? "").toLowerCase();
     return raw === "group" ? ("group" as const) : ("direct" as const);
@@ -78,27 +93,64 @@ export function VideoCallPage() {
   }
 
   const statusLabel =
-    phase === "idle" ? "Standby" : phase === "creating" ? "Creating" : phase === "active" ? "Session active" : "Ended";
+    phase === "idle" ? "Standby" :
+    phase === "creating" ? "Connecting" :
+    phase === "active" ? "Live" :
+    "Ended";
 
   const connectionLabel =
-    phase === "active" ? (socketConnected ? "Socket connected" : "Socket reconnecting…") : "Socket idle";
+    phase === "active" ? (socketConnected ? "Connected" : "Reconnecting…") : "";
 
   return (
-    <div className="malv-operator-call-bg-video flex min-h-0 flex-1 flex-col">
+    <div
+      className="malv-operator-call-bg-video flex min-h-0 flex-1 flex-col"
+      style={{ transition: "background-color 220ms ease" }}
+    >
       <header
-        className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-3 sm:px-5"
-        style={{ borderColor: "oklch(0.18 0.025 260)", background: "oklch(0.05 0.02 280 / 0.35)" }}
+        className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-5"
+        style={{
+          background: "rgb(var(--malv-canvas-rgb) / 0.85)",
+          borderBottom: "1px solid rgb(var(--malv-border-rgb) / 0.08)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)"
+        }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <MobileSidebarTrigger />
-          <div>
-            <h1 className="text-base font-semibold text-malv-text">Video link</h1>
-            <p className="text-[11px] text-malv-text/50">Presence + session channel</p>
+          <div className="flex items-center gap-2">
+            <PhaseIndicator phase={phase} />
+            <div>
+              <h1 className="text-[13px] font-semibold" style={{ color: "rgb(var(--malv-text-rgb))" }}>
+                Video
+              </h1>
+              {connectionLabel ? (
+                <p className="text-[10px] font-mono" style={{ color: "rgb(var(--malv-muted-rgb) / 0.65)" }}>
+                  {connectionLabel}
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <StatusChip label={statusLabel} status={phase === "active" ? "success" : "neutral"} />
-          <span className="text-[10px] font-mono text-malv-text/45">{connectionLabel}</span>
+
+        <div
+          className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium"
+          style={{
+            background:
+              phase === "active" ? "rgb(52 211 153 / 0.1)" :
+              phase === "creating" ? "rgb(251 191 36 / 0.1)" :
+              "rgb(var(--malv-surface-raised-rgb))",
+            border: `1px solid ${
+              phase === "active" ? "rgb(52 211 153 / 0.2)" :
+              phase === "creating" ? "rgb(251 191 36 / 0.2)" :
+              "rgb(var(--malv-border-rgb) / 0.08)"
+            }`,
+            color:
+              phase === "active" ? "rgb(52 211 153 / 0.9)" :
+              phase === "creating" ? "rgb(251 191 36 / 0.9)" :
+              "rgb(var(--malv-muted-rgb))"
+          }}
+        >
+          {statusLabel}
         </div>
       </header>
 

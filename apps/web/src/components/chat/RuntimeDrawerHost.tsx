@@ -4,7 +4,7 @@ import { RuntimeDrawer } from "./RuntimeDrawer";
 
 /** Single app-wide runtime panel — closes and strips `?runtimeSessionId=` when present. */
 export function RuntimeDrawerHost() {
-  const { runtimeDrawerSessionId, runtimeDrawerConversationId, closeRuntimeDrawer } = useMalvAppShell();
+  const { runtimeDrawerSessionId, runtimeDrawerConversationId, runtimeDrawerTaskTitle, runtimeDrawerEntryContext, closeRuntimeDrawer } = useMalvAppShell();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -18,12 +18,21 @@ export function RuntimeDrawerHost() {
     }
   };
 
+  // closeDrawerState — clears context only, no URL navigation.
+  // Used by the footer when it's already navigating to chat (to avoid double-navigate conflict).
+  const closeDrawerState = () => {
+    closeRuntimeDrawer();
+  };
+
   return (
     <RuntimeDrawer
       open={runtimeDrawerSessionId != null}
       sessionId={runtimeDrawerSessionId}
       conversationId={runtimeDrawerConversationId}
+      taskTitle={runtimeDrawerTaskTitle}
+      entryContext={runtimeDrawerEntryContext}
       onClose={onClose}
+      closeDrawerState={closeDrawerState}
     />
   );
 }

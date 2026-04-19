@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480" role="img" aria-label="Analytics preview">
+  <defs>
+    <linearGradient id="bg-analytics" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#022c22"/>
+      <stop offset="100%" style="stop-color:#064e3b"/>
+    </linearGradient>
+    <linearGradient id="acc-analytics" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#34d399"/>
+      <stop offset="100%" style="stop-color:#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="480" fill="url(#bg-analytics)"/>
+  <rect x="0" y="0" width="800" height="44" fill="rgb(2 44 34 / 0.92)"/>
+  <circle cx="22" cy="22" r="5" fill="#f87171"/><circle cx="42" cy="22" r="5" fill="#fbbf24"/><circle cx="62" cy="22" r="5" fill="#4ade80"/>
+  <text x="80" y="28" fill="rgb(167 243 208 / 0.8)" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="600">component</text>
+  <text x="400" y="108" text-anchor="middle" fill="#ecfdf5" font-family="ui-sans-serif,system-ui,sans-serif" font-size="30" font-weight="800">Analytics</text>
+  <text x="400" y="148" text-anchor="middle" fill="rgb(167 243 208 / 0.75)" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15">Funnel � cohorts � export</text>
+  <rect x="56" y="188" width="688" height="56" rx="10" fill="rgb(6 78 59 / 0.85)" stroke="rgb(20 184 166 / 0.35)" stroke-width="1"/>
+  <rect x="76" y="206" width="100" height="20" rx="5" fill="url(#acc-analytics)" opacity="0.5"/>
+  <rect x="200" y="206" width="100" height="20" rx="5" fill="rgb(20 184 166 / 0.25)"/>
+  <rect x="324" y="206" width="100" height="20" rx="5" fill="rgb(20 184 166 / 0.25)"/>
+  <rect x="56" y="260" width="400" height="188" rx="12" fill="rgb(6 78 59 / 0.75)" stroke="rgb(20 184 166 / 0.3)" stroke-width="1"/>
+  <rect x="472" y="260" width="272" height="188" rx="12" fill="rgb(6 78 59 / 0.75)" stroke="rgb(20 184 166 / 0.3)" stroke-width="1"/>
+  <rect x="80" y="380" width="32" height="48" rx="4" fill="url(#acc-analytics)" opacity="0.7"/>
+  <rect x="124" y="340" width="32" height="88" rx="4" fill="rgb(20 184 166 / 0.45)"/>
+  <rect x="168" y="360" width="32" height="68" rx="4" fill="rgb(20 184 166 / 0.35)"/>
+  <rect x="212" y="320" width="32" height="108" rx="4" fill="url(#acc-analytics)" opacity="0.55"/>
+</svg>

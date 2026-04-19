@@ -9,17 +9,43 @@ import {
   detectMalvIdentityQuestion,
   detectSimpleGreeting
 } from "./malv-conversation-signals";
+import { resolveMalvIdentityResponse } from "./malv-identity-policy";
 
-/** Whole-message casual check — does not match "what's up with the …". */
-export function detectBareCasualSmallTalk(message: string): boolean {
+/** Max length for whole-message social check-ins (avoids matching real questions). */
+const SOCIAL_SMALLTALK_CHECKIN_MAX_CHARS = 96;
+
+/**
+ * Whole-message social check-in / casual wellbeing probes (no trailing task text).
+ * Covers forms like "how are you doing?" that must not hit the inference path when the worker is down.
+ */
+export function detectSocialSmalltalkCheckin(message: string): boolean {
   const t = message.trim();
-  if (t.length > 72) return false;
-  return /^(what'?s up|how are you|how'?s it going|how\s+you\s+been)\s*[!.,?]*\s*$/i.test(t);
+  if (t.length > SOCIAL_SMALLTALK_CHECKIN_MAX_CHARS) return false;
+  const patterns: RegExp[] = [
+    /^what'?s\s+up\s*[!.,?]*\s*$/i,
+    /^how\s+are\s+you(\s+doing)?\s*[!.,?]*\s*$/i,
+    /^how'?re\s+you(\s+doing)?\s*[!.,?]*\s*$/i,
+    /^how'?s\s+it\s+going\s*[!.,?]*\s*$/i,
+    /^how\s+you\s+been\s*[!.,?]*\s*$/i,
+    /^how\s+you\s+doing\s*[!.,?]*\s*$/i,
+    /^you\s+good\s*[!.,?]*\s*$/i,
+    /^all\s+good(\s+on\s+your\s+end)?\s*[!.,?]*\s*$/i,
+    /^how'?s\s+everything\s*[!.,?]*\s*$/i,
+    /^how'?s\s+life\s*[!.,?]*\s*$/i
+  ];
+  return patterns.some((re) => re.test(t));
+}
+
+/** @deprecated Prefer {@link detectSocialSmalltalkCheckin}; kept for callers/tests. */
+export function detectBareCasualSmallTalk(message: string): boolean {
+  return detectSocialSmalltalkCheckin(message);
 }
 
 export type MalvDetectedIntent =
   | "greeting"
   | "identity_question"
+  /** Deterministic template path: wellbeing / casual check-in (distinct from task-bearing phrasing). */
+  | "social_smalltalk_checkin"
   | "casual_small_talk"
   | "task_request"
   | "technical_request"
@@ -154,7 +180,7 @@ export function detectMalvIntent(userMessage: string): MalvDetectedIntent {
 
   if (t.length <= 20 && /^(hey|yo|hi|sup|hiya)\b/i.test(t) && /\s/.test(t) === false) return "short_ping";
 
-  if (detectBareCasualSmallTalk(userMessage)) return "casual_small_talk";
+  if (detectSocialSmalltalkCheckin(userMessage)) return "social_smalltalk_checkin";
 
   if (TECH_HEAVY.test(lower)) return "technical_request";
 
@@ -359,87 +385,9 @@ function buildLightSocial(kind: LightSocialKind, seed: number): string {
 }
 
 function buildIdentity(kind: IdentityQuestionKind, ctx: MalvResponseContext, seed: number): string {
-  const recent = recentAssistantBodies(ctx.conversationHistory);
-  const imMalvHeavy = recent.filter((t) => /^i'?m\s+malv\b/i.test(firstLine(t))).length >= 2;
-  const preferShortName = kind === "name" || ctx.userEnergyLevel === "short";
-
-  const nameSolo = ["MALV.", "MALV — that's it.", "Name's MALV.", "Just MALV."];
-
-  const roleBits = [
-    "private operator on your stack",
-    "layer that helps you think, build, and ship",
-    "calm operator wired into your workspace",
-    "execution-minded layer — plans, code, triage",
-    "more operator than assistant"
-  ];
-
-  const whoHooks = [
-    "I help you turn intent into the next concrete move.",
-    "I stay precise and move with you — no helpdesk theater.",
-    "Planning, debugging, drafting — whatever clears the path.",
-    "You bring context; I help shape the next step."
-  ];
-
-  const whatHooks = [
-    "You bring direction or a mess — I help shape the next move.",
-    "Think with you, execute with you — on your side of the fence.",
-    "Sharp answers and operator-grade follow-through on your stack.",
-    "Grounded intelligence — we work problems, not scripts."
-  ];
-
-  const capHooks = [
-    "Scope, plan, review, debug, draft — whatever moves the thread.",
-    "Analyze, sequence actions, keep momentum without fluff.",
-    "From architecture notes to step-by-step fixes — with you in the loop.",
-    "Strategy, triage, implementation guidance — under your policy."
-  ];
-
-  const aiHooks = [
-    "AI under the hood; MALV in the room — private and controlled.",
-    "Yes, machine intelligence — product face is MALV, built for real work.",
-    "Model-backed, running as MALV — operator stance, not a generic chatbot pitch."
-  ];
-
-  const rb = roleBits[pickIndex(seed, roleBits.length, 0)]!;
-  const hookPick = (pool: string[], salt: number) => pool[pickIndex(seed, pool.length, salt)]!;
-
-  switch (kind) {
-    case "name":
-      if (preferShortName && pickIndex(seed, 2, 99) === 0) {
-        return nameSolo[pickIndex(seed, nameSolo.length, 1)]!;
-      }
-      return composeMalvUtterance({
-        core: `I'm MALV — ${rb}.`,
-        followup: pickIndex(seed, 3, 2) === 0 ? hookPick(whoHooks, 3) : undefined
-      });
-    case "who":
-      if (imMalvHeavy) {
-        return composeMalvUtterance({
-          core: `MALV — ${rb}.`,
-          followup: hookPick(whoHooks, 4)
-        });
-      }
-      return composeMalvUtterance({
-        core: `I'm MALV — ${rb}.`,
-        followup: hookPick(whoHooks, 5)
-      });
-    case "what":
-      return composeMalvUtterance({
-        core: `I'm MALV — ${hookPick(whatHooks, 6)}`,
-        followup: pickIndex(seed, 2, 7) === 0 ? rb + "." : undefined
-      });
-    case "capabilities":
-      return composeMalvUtterance({
-        core: hookPick(capHooks, 8),
-        followup: pickIndex(seed, 2, 9) === 0 ? `Framed as MALV — ${rb}.` : undefined
-      });
-    case "ai":
-    default:
-      return composeMalvUtterance({
-        core: hookPick(aiHooks, 10),
-        followup: pickIndex(seed, 3, 11) === 0 ? "Still MALV — same channel." : undefined
-      });
-  }
+  void ctx;
+  void seed;
+  return resolveMalvIdentityResponse(kind);
 }
 
 function buildCasualSmallTalk(ctx: MalvResponseContext, seed: number): string {
@@ -517,8 +465,9 @@ export function generateMalvResponse(ctx: MalvResponseContext): string {
       case "short_ping":
         return buildGreeting(ctx, seed);
       case "identity_question":
-        if (!ctx.identityKind) return composeMalvUtterance({ core: "I'm MALV — operator on your stack." });
+        if (!ctx.identityKind) return composeMalvUtterance({ core: "I'm MALV — I work with you directly." });
         return buildIdentity(ctx.identityKind, ctx, seed);
+      case "social_smalltalk_checkin":
       case "casual_small_talk":
         return buildCasualSmallTalk(ctx, seed);
       default:

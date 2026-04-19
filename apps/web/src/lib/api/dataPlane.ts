@@ -1,4 +1,6 @@
-import { apiFetch, apiUpload } from "./http";
+import { sanitizeBuildUnitPreviewFields } from "../preview/previewArtifactValidation";
+import { apiFetch, apiFetchBlob, apiUpload } from "./http";
+import { parseNestErrorMessage } from "./http-core";
 
 export type FileKind = "pdf" | "image" | "audio" | "video" | "doc" | "text";
 
@@ -59,19 +61,72 @@ export type CollaborationRoomMember = {
   role: string;
 };
 
-export type WorkspaceTaskStatus = "todo" | "in_progress" | "done";
-export type WorkspaceTaskSource = "call" | "chat" | "manual";
+export type WorkspaceTaskStatus = "todo" | "in_progress" | "done" | "archived";
+export type WorkspaceTaskSource = "call" | "chat" | "manual" | "studio" | "voice" | "inbox" | "collaboration" | "external" | "system";
+export type WorkspaceTaskPriority = "low" | "normal" | "high" | "urgent";
+export type WorkspaceTaskExecutionType =
+  | "manual"
+  | "automated"
+  | "reminder"
+  | "scheduled"
+  | "approval_gate"
+  | "reminder_only"
+  | "call_followup"
+  | "chat_followup"
+  | "external_action"
+  | "workflow_task"
+  | "manual_checklist";
+
+export type WorkspaceTaskExecutionState =
+  | "idle"
+  | "pending"
+  | "scheduled"
+  | "due"
+  | "dispatched"
+  | "running"
+  | "waiting_input"
+  | "waiting_approval"
+  | "blocked"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type WorkspaceTaskRiskLevel = "low" | "medium" | "high" | "critical";
 
 export type WorkspaceTask = {
   id: string;
   title: string;
   description: string | null;
   status: WorkspaceTaskStatus;
+  priority: WorkspaceTaskPriority;
+  /** Legacy source field — kept for backward compat. Prefer sourceSurface. */
   source: WorkspaceTaskSource;
+  /** Canonical surface where this task originated. */
+  sourceSurface: WorkspaceTaskSource;
+  /** Semantic type of source object (e.g. "conversation", "call_session"). */
+  sourceType?: string | null;
+  /** ID of the originating source object. */
+  sourceReferenceId?: string | null;
+  executionType: WorkspaceTaskExecutionType;
+  executionState: WorkspaceTaskExecutionState;
   conversationId: string | null;
   callSessionId: string | null;
   roomId: string | null;
   assigneeUserId?: string | null;
+  dueAt?: string | null;
+  scheduledFor?: string | null;
+  reminderAt?: string | null;
+  requiresApproval?: boolean;
+  riskLevel?: WorkspaceTaskRiskLevel;
+  tags?: string[] | null;
+  completedAt?: string | null;
+  archivedAt?: string | null;
+  metadata?: Record<string, unknown> | null;
+  executionLeaseOwner?: string | null;
+  executionLeaseExpiresAt?: string | null;
+  executionLastAttemptAt?: string | null;
+  executionLastOutcome?: string | null;
+  executionFailureCode?: string | null;
+  executionFailureDetail?: string | null;
   updatedAt?: string;
   createdAt?: string;
 };
@@ -457,11 +512,20 @@ export async function uploadFileToStorage(
   fd.append("fileKind", args.fileKind);
   if (args.workspaceId) fd.append("workspaceId", args.workspaceId);
   if (args.roomId) fd.append("roomId", args.roomId);
-  return apiUpload<{ ok: boolean; fileId: string; storageUri: string }>({
+  const data = await apiUpload<{ ok?: boolean; fileId?: string; storageUri?: string; error?: string }>({
     path: "/v1/files/upload",
     accessToken,
     formData: fd
   });
+  const fileId = typeof data.fileId === "string" ? data.fileId.trim() : "";
+  if (data.ok !== true || !fileId) {
+    const detail =
+      typeof data.error === "string" && data.error.trim()
+        ? data.error.trim()
+        : "Server did not register the upload (missing file id).";
+    throw new Error(detail);
+  }
+  return { ok: true as const, fileId, storageUri: data.storageUri ?? "" };
 }
 
 export async function fetchFiles(accessToken: string, args?: { limit?: number; offset?: number }) {
@@ -738,12 +802,90 @@ export async function fetchWorkspaceRuntimeSession(accessToken: string, sessionI
   });
 }
 
-export async function fetchWorkspaceTasks(accessToken: string, query?: { status?: "todo" | "in_progress" | "done"; limit?: number }) {
+/**
+ * Send a message to MALV — optionally within an existing conversation (task thread).
+ * Works identically to the chat page, but callable from any surface.
+ */
+export async function sendChatMessage(
+  accessToken: string,
+  body: { message: string; conversationId?: string | null; sessionType?: string | null }
+) {
+  return apiFetch<{ reply: string; conversationId?: string; runId?: string }>({
+    path: "/v1/chat",
+    method: "POST",
+    accessToken,
+    body: {
+      message:        body.message,
+      conversationId: body.conversationId ?? null,
+      sessionType:    body.sessionType ?? null
+    }
+  });
+}
+
+export type ExploreImageInferredAttributes = {
+  style?: string;
+  mood?: string;
+  lighting?: string;
+  composition?: string;
+  detail?: string;
+};
+
+export type ExploreImageInterpretation = {
+  refinedPrompt: string;
+  userPrompt?: string;
+  inferred: ExploreImageInferredAttributes;
+  confidence: number;
+};
+
+export type ExploreImageGenerateResponse = {
+  status: "processing" | "done";
+  interpretation: ExploreImageInterpretation;
+  imageUrl?: string;
+  logs?: string[];
+  plan?: { steps: string[] };
+  directionSummary?: string;
+};
+
+/** Explore image pipeline: intent interpretation + execution plan (image URL when backend exists). */
+export async function postExploreImageGenerate(
+  accessToken: string,
+  body: {
+    prompt: string;
+    sourceImageDataUrl?: string;
+    sourceImageFileId?: string;
+    modeId?: string;
+    promptExpansionMode?: string;
+  },
+  signal?: AbortSignal
+) {
+  return apiFetch<ExploreImageGenerateResponse>({
+    path: "/v1/explore/image/generate",
+    method: "POST",
+    accessToken,
+    body: {
+      prompt: body.prompt,
+      ...(body.sourceImageFileId ? { sourceImageFileId: body.sourceImageFileId } : {}),
+      ...(!body.sourceImageFileId && body.sourceImageDataUrl ? { sourceImageDataUrl: body.sourceImageDataUrl } : {}),
+      ...(body.modeId ? { modeId: body.modeId } : {}),
+      ...(body.promptExpansionMode ? { promptExpansionMode: body.promptExpansionMode } : {})
+    },
+    signal
+  });
+}
+
+export async function fetchWorkspaceTasks(accessToken: string, query?: { status?: WorkspaceTaskStatus; limit?: number }) {
   const q = new URLSearchParams();
   if (query?.status) q.set("status", query.status);
   if (query?.limit != null) q.set("limit", String(query.limit));
   return apiFetch<{ ok: boolean; tasks: WorkspaceTask[] }>({
     path: `/v1/workspaces/tasks${q.toString() ? `?${q.toString()}` : ""}`,
+    accessToken
+  });
+}
+
+export async function fetchArchivedWorkspaceTasks(accessToken: string) {
+  return apiFetch<{ ok: boolean; tasks: WorkspaceTask[] }>({
+    path: "/v1/workspaces/tasks?status=archived&limit=200",
     accessToken
   });
 }
@@ -764,12 +906,23 @@ export async function createWorkspaceTask(
   body: {
     title: string;
     description?: string | null;
-    status?: "todo" | "in_progress" | "done";
-    source?: "call" | "chat" | "manual";
+    status?: WorkspaceTaskStatus;
+    priority?: WorkspaceTaskPriority;
+    source?: WorkspaceTaskSource;
+    sourceSurface?: WorkspaceTaskSource;
+    sourceType?: string | null;
+    sourceReferenceId?: string | null;
+    executionType?: WorkspaceTaskExecutionType;
     conversationId?: string | null;
     callSessionId?: string | null;
     roomId?: string | null;
     assigneeUserId?: string | null;
+    dueAt?: string | null;
+    scheduledFor?: string | null;
+    reminderAt?: string | null;
+    requiresApproval?: boolean;
+    riskLevel?: WorkspaceTaskRiskLevel;
+    tags?: string[] | null;
   }
 ) {
   return apiFetch<{ ok: boolean; task: WorkspaceTask }>({
@@ -792,10 +945,31 @@ export async function createWorkspaceTaskFromChatOutput(
   });
 }
 
+export async function archiveWorkspaceTask(accessToken: string, taskId: string) {
+  return apiFetch<{ ok: boolean; task: WorkspaceTask }>({
+    path: `/v1/workspaces/tasks/${encodeURIComponent(taskId)}/archive`,
+    method: "POST",
+    accessToken
+  });
+}
+
 export async function patchWorkspaceTask(
   accessToken: string,
   taskId: string,
-  body: { title?: string; description?: string | null; status?: "todo" | "in_progress" | "done"; assigneeUserId?: string | null }
+  body: {
+    title?: string;
+    description?: string | null;
+    status?: WorkspaceTaskStatus;
+    priority?: WorkspaceTaskPriority;
+    executionState?: WorkspaceTaskExecutionState;
+    assigneeUserId?: string | null;
+    dueAt?: string | null;
+    scheduledFor?: string | null;
+    reminderAt?: string | null;
+    requiresApproval?: boolean;
+    riskLevel?: WorkspaceTaskRiskLevel;
+    tags?: string[] | null;
+  }
 ) {
   return apiFetch<{ ok: boolean; task: WorkspaceTask }>({
     path: `/v1/workspaces/tasks/${encodeURIComponent(taskId)}`,
@@ -1066,5 +1240,578 @@ export async function compareStudioVersions(
     method: "POST",
     accessToken,
     body
+  });
+}
+
+// ─── Build Units ──────────────────────────────────────────────────────────────
+
+export type BuildUnitType =
+  | "template"
+  | "component"
+  | "behavior"
+  | "workflow"
+  | "plugin"
+  | "blueprint"
+  | "ai_generated";
+
+export type BuildUnitVisibility = "public" | "private" | "team";
+export type BuildUnitSourceKind = "system" | "user";
+
+export type BuildUnitPreviewKind = "image" | "code" | "rendered" | "animation" | "mixed" | "none";
+
+/** Server-computed, deterministic preview feasibility (Explore + intakes). */
+export type ApiPreviewFeasibility = {
+  previewFeasible: boolean;
+  previewMode: "none" | "code" | "static" | "live";
+  reasonCode: string;
+  reasonLabel: string;
+  blockingIssues: string[];
+  /** When true, a browser preview artifact may still be materializing (async build). */
+  frontendPreviewable?: boolean;
+  signals: {
+    framework?: string | null;
+    runtime?: string | null;
+    entrypointDetected?: boolean;
+    surface?: string | null;
+  };
+};
+
+/** Live preview delivery (build units only). `url` / `fetchPath` require Bearer — not a public iframe src. */
+export type ApiLivePreview = {
+  available: boolean;
+  kind: "iframe_url" | "html_doc";
+  url?: string | null;
+  fetchPath?: string | null;
+  mimeType?: string | null;
+  viewport?: "component" | "page";
+  title?: string | null;
+  generatedAt?: string | null;
+  reasonCode?: string | null;
+  reasonLabel?: string | null;
+};
+
+export type BuildUnitExecutionProfile = {
+  requiresInput: boolean;
+  steps:         Array<{ order: number; label: string; detail?: string }>;
+  estimatedComplexity: "low" | "medium" | "high";
+};
+
+/** User-owned units only: explicit async preview pipeline phase (additive API contract). */
+export type BuildUnitPreviewPipelineStatus = "pending" | "ready" | "failed" | "not_previewable";
+
+export type ApiBuildUnit = {
+  id:                  string;
+  slug:                string;
+  title:               string;
+  description:         string | null;
+  type:                BuildUnitType;
+  category:            string;
+  tags:                string[] | null;
+  prompt:              string | null;
+  codeSnippet:         string | null;
+  previewImageUrl:     string | null;
+  previewKind:         BuildUnitPreviewKind;
+  /** Persisted Explore grid snapshot (files.id); preferred over previewFileId for catalog cards. */
+  previewSnapshotId:   string | null;
+  previewFileId:       string | null;
+  sourceFileId:        string | null;
+  sourceFileName:      string | null;
+  sourceFileMime:      string | null;
+  sourceFileUrl:       string | null;
+  authorUserId:        string | null;
+  authorLabel:         string | null;
+  visibility:          BuildUnitVisibility;
+  sourceKind:          BuildUnitSourceKind;
+  originalBuildUnitId: string | null;
+  forkable:            boolean;
+  downloadable:        boolean;
+  verified:            boolean;
+  trending:            boolean;
+  recommended:         boolean;
+  isNew:               boolean;
+  accent:              string | null;
+  usesCount:           number;
+  forksCount:          number;
+  downloadsCount:      number;
+  /** Optional extension point: usage lineage, fork hints, provenance — not for social counters. */
+  metadataJson:        Record<string, unknown> | null;
+  /** Present after API backfill; may be absent on stale list payloads. */
+  executionProfileJson?: Record<string, unknown> | null;
+  /** Code-derived preview lifecycle (null for legacy catalog rows). */
+  intakePreviewState?: "not_requested" | "queued" | "ready" | "unavailable" | null;
+  intakePreviewUnavailableReason?: string | null;
+  intakeAuditDecision?: "pending" | "approved" | "approved_with_warnings" | "declined" | null;
+  intakeDetectionJson?: Record<string, unknown> | null;
+  /** When present on detail payloads, authoritative preview permission vs coarse intake fields. */
+  normalizedReview?: ApiNormalizedSourceIntakeReview | null;
+  /** Present when API runs preview feasibility v1. */
+  previewFeasibility?: ApiPreviewFeasibility | null;
+  /** Present when server evaluates live delivery (detail/list). */
+  livePreview?: ApiLivePreview | null;
+  /** User-owned units: server-derived pending vs terminal failure vs ready (omit on catalog rows). */
+  previewPipelineStatus?: BuildUnitPreviewPipelineStatus | null;
+  createdAt:           string;
+  updatedAt:           string;
+  archivedAt:          string | null;
+};
+
+/** Coerce nullable preview fields for older API payloads and sanitize preview URLs at the data boundary. */
+export function normalizeApiBuildUnit(u: ApiBuildUnit): ApiBuildUnit {
+  return sanitizeBuildUnitPreviewFields({
+    ...u,
+    previewKind:    u.previewKind ?? "none",
+    previewSnapshotId: u.previewSnapshotId ?? null,
+    previewFileId:  u.previewFileId ?? null,
+    sourceFileId:     u.sourceFileId ?? null,
+    sourceFileName:   u.sourceFileName ?? null,
+    sourceFileMime:   u.sourceFileMime ?? null,
+    sourceFileUrl:    u.sourceFileUrl ?? null,
+    intakePreviewState:             u.intakePreviewState ?? null,
+    intakePreviewUnavailableReason: u.intakePreviewUnavailableReason ?? null,
+    intakeAuditDecision:            u.intakeAuditDecision ?? null,
+    intakeDetectionJson:            u.intakeDetectionJson ?? null,
+    normalizedReview:               u.normalizedReview ?? null,
+    previewFeasibility:             u.previewFeasibility ?? null,
+    livePreview:                    u.livePreview ?? null,
+    previewPipelineStatus:          u.previewPipelineStatus ?? null
+  });
+}
+
+export type SourceIntakeSessionStatus =
+  | "uploaded"
+  | "detecting"
+  | "auditing"
+  | "approved"
+  | "approved_with_warnings"
+  | "declined";
+
+export type SourceIntakeAuditDecision = "pending" | "approved" | "approved_with_warnings" | "declined";
+
+export type SourceIntakePreviewState = "not_requested" | "queued" | "ready" | "unavailable";
+
+/** Backend-normalized review policy (v1). Mirrors `auditJson.modelReview` + live `buildUnitId` gates. */
+export type ApiNormalizedSourceIntakeReview = {
+  version: 1;
+  reviewMode: "static_policy_only" | "model_assisted";
+  decision: "approved" | "approved_with_warnings" | "declined" | "pending";
+  rationale: string;
+  previewAllowed: boolean;
+  publishAllowed: boolean;
+  pipelineReadError: boolean;
+  limitations: string[];
+  modelReview: Record<string, unknown> | null;
+  reviewPolicy: Record<string, unknown>;
+};
+
+export type ApiSourceIntakeSession = {
+  id: string;
+  userId: string;
+  status: SourceIntakeSessionStatus;
+  auditDecision: SourceIntakeAuditDecision;
+  sourceFileId: string;
+  detectionJson: Record<string, unknown> | null;
+  auditJson: Record<string, unknown> | null;
+  /** Truthful one-line policy outcome from static review (not a malware verdict). */
+  auditSummary: string | null;
+  previewState: SourceIntakePreviewState;
+  previewUnavailableReason: string | null;
+  buildUnitId: string | null;
+  previewFeasibility?: ApiPreviewFeasibility | null;
+  /** Policy truth distinct from `previewFeasibility` (technical feasibility). */
+  normalizedReview?: ApiNormalizedSourceIntakeReview | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function normalizeSourceIntakeSession(raw: ApiSourceIntakeSession): ApiSourceIntakeSession {
+  return {
+    ...raw,
+    detectionJson: raw.detectionJson ?? null,
+    auditJson: raw.auditJson ?? null,
+    auditSummary: raw.auditSummary ?? null,
+    previewUnavailableReason: raw.previewUnavailableReason ?? null,
+    buildUnitId: raw.buildUnitId ?? null,
+    previewFeasibility: raw.previewFeasibility ?? null,
+    normalizedReview: raw.normalizedReview ?? null
+  };
+}
+
+export async function createSourceIntakeSession(accessToken: string, file: File) {
+  const form = new FormData();
+  form.set("file", file);
+  const raw = await apiUpload<{ ok: boolean; session?: ApiSourceIntakeSession; error?: string }>({
+    path: "/v1/workspaces/source-intakes",
+    accessToken,
+    formData: form
+  });
+  if (!raw.ok || !raw.session) return { ok: false as const, error: raw.error ?? "Intake failed" };
+  return { ok: true as const, session: normalizeSourceIntakeSession(raw.session) };
+}
+
+export async function fetchSourceIntakeSession(accessToken: string, id: string) {
+  const raw = await apiFetch<{ ok: boolean; session?: ApiSourceIntakeSession; error?: string }>({
+    path: `/v1/workspaces/source-intakes/${encodeURIComponent(id)}`,
+    accessToken
+  });
+  if (!raw.ok || !raw.session) return { ok: false as const, error: raw.error ?? "Not found" };
+  return { ok: true as const, session: normalizeSourceIntakeSession(raw.session) };
+}
+
+export type PublishSourceIntakeBody = {
+  title?: string;
+  description?: string | null;
+  category?: string;
+  type?: string;
+  tags?: string[];
+};
+
+/** Server creates a build unit and links `session.buildUnitId`. Eligibility enforced server-side only. */
+export async function publishSourceIntake(
+  accessToken: string,
+  intakeSessionId: string,
+  body?: PublishSourceIntakeBody
+) {
+  try {
+    const raw = await apiFetch<{
+      ok: boolean;
+      buildUnit?: ApiBuildUnit;
+      session?: ApiSourceIntakeSession;
+      error?: string;
+    }>({
+      path: `/v1/workspaces/source-intakes/${encodeURIComponent(intakeSessionId)}/publish`,
+      accessToken,
+      method: "POST",
+      body: body && Object.keys(body).length ? body : {}
+    });
+    if (!raw.ok || !raw.buildUnit || !raw.session) {
+      return { ok: false as const, error: raw.error ?? "Publish failed" };
+    }
+    return {
+      ok: true as const,
+      buildUnit: normalizeApiBuildUnit(raw.buildUnit),
+      session: normalizeSourceIntakeSession(raw.session)
+    };
+  } catch (e) {
+    return {
+      ok: false as const,
+      error: e instanceof Error ? parseNestErrorMessage(e) : "Publish failed"
+    };
+  }
+}
+
+/** Local/dev only — POST `v1/dev/explore-fixtures/landing-published-unit`. 404 in production unless `MALV_DEV_EXPLORE_FIXTURES=1`. */
+export async function devSeedExploreLandingUnit(accessToken: string) {
+  try {
+    const raw = await apiFetch<{
+      ok: boolean;
+      unit?: ApiBuildUnit;
+      error?: string;
+    }>({
+      path: "/v1/dev/explore-fixtures/landing-published-unit",
+      accessToken,
+      method: "POST",
+      body: {}
+    });
+    if (!raw.ok || !raw.unit) {
+      return { ok: false as const, error: raw.error ?? "Fixture seed failed" };
+    }
+    return { ok: true as const, unit: normalizeApiBuildUnit(raw.unit) };
+  } catch (e) {
+    return {
+      ok: false as const,
+      error: e instanceof Error ? parseNestErrorMessage(e) : "Fixture seed failed"
+    };
+  }
+}
+
+/** Local/dev only — POST `v1/dev/explore-fixtures/landing-source-intake`. */
+export async function devSeedExploreLandingIntake(accessToken: string) {
+  try {
+    const raw = await apiFetch<{
+      ok: boolean;
+      session?: ApiSourceIntakeSession;
+      error?: string;
+    }>({
+      path: "/v1/dev/explore-fixtures/landing-source-intake",
+      accessToken,
+      method: "POST",
+      body: {}
+    });
+    if (!raw.ok || !raw.session) {
+      return { ok: false as const, error: raw.error ?? "Fixture seed failed" };
+    }
+    return { ok: true as const, session: normalizeSourceIntakeSession(raw.session) };
+  } catch (e) {
+    return {
+      ok: false as const,
+      error: e instanceof Error ? parseNestErrorMessage(e) : "Fixture seed failed"
+    };
+  }
+}
+
+export type ApiBuildUnitVersion = {
+  id:            string;
+  buildUnitId:   string;
+  versionNumber: number;
+  snapshotJson:  Record<string, unknown>;
+  createdAt:     string;
+};
+
+export type ApiBuildUnitComposition = {
+  id:           string;
+  name:         string;
+  userId:       string;
+  unitIds:      string[];
+  metadataJson: Record<string, unknown> | null;
+  createdAt:    string;
+};
+
+export async function fetchBuildUnits(
+  accessToken: string,
+  query?: {
+    type?:     string;
+    category?: string;
+    section?:  "trending" | "recommended" | "new";
+    mine?:     boolean;
+    forked?:   boolean;
+    search?:   string;
+    limit?:    number;
+    page?:     number;
+  }
+) {
+  const q = new URLSearchParams();
+  if (query?.type)     q.set("type",     query.type);
+  if (query?.category) q.set("category", query.category);
+  if (query?.section)  q.set("section",  query.section);
+  if (query?.mine)     q.set("mine",     "true");
+  if (query?.forked)   q.set("forked",   "true");
+  if (query?.search)   q.set("search",   query.search);
+  if (query?.limit  != null) q.set("limit",  String(query.limit));
+  if (query?.page   != null) q.set("page",   String(query.page));
+  const raw = await apiFetch<{ ok: boolean; units: ApiBuildUnit[]; total: number; hasMore: boolean }>({
+    path: `/v1/workspaces/units${q.toString() ? `?${q.toString()}` : ""}`,
+    accessToken
+  });
+  return {
+    ...raw,
+    units: (raw.units ?? []).map(normalizeApiBuildUnit)
+  };
+}
+
+export async function fetchBuildUnit(accessToken: string, id: string) {
+  const raw = await apiFetch<{ ok: boolean; unit: ApiBuildUnit }>({
+    path: `/v1/workspaces/units/${encodeURIComponent(id)}`,
+    accessToken
+  });
+  return raw.ok && raw.unit ? { ...raw, unit: normalizeApiBuildUnit(raw.unit) } : raw;
+}
+
+export async function forkBuildUnit(accessToken: string, id: string) {
+  const raw = await apiFetch<{ ok: boolean; unit: ApiBuildUnit }>({
+    path: `/v1/workspaces/units/${encodeURIComponent(id)}/fork`,
+    method: "POST",
+    accessToken
+  });
+  return raw.ok && raw.unit ? { ...raw, unit: normalizeApiBuildUnit(raw.unit) } : raw;
+}
+
+export async function patchBuildUnit(
+  accessToken: string,
+  id: string,
+  body: {
+    title?:       string;
+    description?: string | null;
+    tags?:        string[] | null;
+    prompt?:      string | null;
+    codeSnippet?: string | null;
+    category?:    string;
+    visibility?:  BuildUnitVisibility;
+    forkable?:    boolean;
+    downloadable?: boolean;
+    accent?:      string | null;
+    previewKind?:       BuildUnitPreviewKind;
+    previewImageUrl?:   string | null;
+    previewFileId?:     string | null;
+    sourceFileId?:      string | null;
+    sourceFileName?:    string | null;
+    sourceFileMime?:    string | null;
+    sourceFileUrl?:     string | null;
+  }
+) {
+  const raw = await apiFetch<{ ok: boolean; unit: ApiBuildUnit }>({
+    path:   `/v1/workspaces/units/${encodeURIComponent(id)}`,
+    method: "PATCH",
+    accessToken,
+    body
+  });
+  return raw.ok && raw.unit ? { ...raw, unit: normalizeApiBuildUnit(raw.unit) } : raw;
+}
+
+export async function sendBuildUnitToTask(accessToken: string, id: string) {
+  return apiFetch<{ ok: boolean; task: { id: string; title: string; status: string }; taskLinkId: string }>({
+    path:   `/v1/workspaces/units/${encodeURIComponent(id)}/send-to-task`,
+    method: "POST",
+    accessToken
+  });
+}
+
+export async function seedBuildUnits(accessToken: string) {
+  return apiFetch<{ ok: boolean; seeded: number; skipped: number }>({
+    path:   "/v1/workspaces/units/seed",
+    method: "POST",
+    accessToken
+  });
+}
+
+export async function createBuildUnit(
+  accessToken: string,
+  body: {
+    title:        string;
+    description?: string | null;
+    type:         BuildUnitType;
+    category:     string;
+    tags?:        string[] | null;
+    prompt?:      string | null;
+    codeSnippet?: string | null;
+    visibility?:  BuildUnitVisibility;
+    forkable?:    boolean;
+    downloadable?: boolean;
+    accent?:      string | null;
+    previewKind?:       BuildUnitPreviewKind;
+    previewImageUrl?:   string | null;
+    previewFileId?:     string | null;
+    sourceFileId?:      string | null;
+    sourceFileName?:    string | null;
+    sourceFileMime?:    string | null;
+    sourceFileUrl?:     string | null;
+  }
+) {
+  const raw = await apiFetch<{ ok: boolean; unit: ApiBuildUnit }>({
+    path:   "/v1/workspaces/units",
+    method: "POST",
+    accessToken,
+    body
+  });
+  return raw.ok && raw.unit ? { ...raw, unit: normalizeApiBuildUnit(raw.unit) } : raw;
+}
+
+export async function uploadBuildUnitPreview(accessToken: string, file: File) {
+  const formData = new FormData();
+  formData.set("file", file);
+  return apiUpload<{ ok: boolean; fileId: string; storageUri: string; mimeType: string | null }>({
+    path:       "/v1/workspaces/units/uploads/preview",
+    accessToken,
+    formData
+  });
+}
+
+export async function uploadBuildUnitSource(accessToken: string, file: File) {
+  const formData = new FormData();
+  formData.set("file", file);
+  return apiUpload<{ ok: boolean; fileId: string; storageUri: string; mimeType: string | null }>({
+    path:       "/v1/workspaces/units/uploads/source",
+    accessToken,
+    formData
+  });
+}
+
+export async function fetchBuildUnitSourceBlob(accessToken: string, unitId: string): Promise<Blob> {
+  return apiFetchBlob({
+    path:        `/v1/workspaces/units/${encodeURIComponent(unitId)}/source-download`,
+    accessToken
+  });
+}
+
+export async function fetchBuildUnitVersions(accessToken: string, unitId: string) {
+  return apiFetch<{ ok: boolean; versions: ApiBuildUnitVersion[] }>({
+    path: `/v1/workspaces/units/${encodeURIComponent(unitId)}/versions`,
+    accessToken
+  });
+}
+
+export type ImproveBuildUnitOptions = {
+  /** Optional — biases server-side improve prompt (Explore preview intents). */
+  improveIntent?: "generic_improve" | "optimize_mobile" | "tighten_spacing_typography";
+};
+
+export async function improveBuildUnit(accessToken: string, unitId: string, options?: ImproveBuildUnitOptions) {
+  const body =
+    options?.improveIntent != null
+      ? { improveIntent: options.improveIntent }
+      : undefined;
+  const raw = await apiFetch<{ ok: boolean; unit: ApiBuildUnit }>({
+    path:   `/v1/workspaces/units/${encodeURIComponent(unitId)}/improve`,
+    method: "POST",
+    accessToken,
+    body
+  });
+  return raw.ok && raw.unit ? { ...raw, unit: normalizeApiBuildUnit(raw.unit) } : raw;
+}
+
+export async function createUnitComposition(
+  accessToken: string,
+  body: { name: string; unitIds: string[]; metadataJson?: Record<string, unknown> | null }
+) {
+  return apiFetch<{ ok: boolean; composition: ApiBuildUnitComposition }>({
+    path:   "/v1/workspaces/unit-compositions",
+    method: "POST",
+    accessToken,
+    body
+  });
+}
+
+export async function fetchMyUnitCompositions(accessToken: string) {
+  return apiFetch<{ ok: boolean; compositions: ApiBuildUnitComposition[] }>({
+    path: "/v1/workspaces/unit-compositions/mine",
+    accessToken
+  });
+}
+
+export async function fetchUnitComposition(accessToken: string, compositionId: string) {
+  return apiFetch<{ ok: boolean; composition: ApiBuildUnitComposition }>({
+    path: `/v1/workspaces/unit-compositions/${encodeURIComponent(compositionId)}`,
+    accessToken
+  });
+}
+
+export async function patchUnitComposition(accessToken: string, compositionId: string, body: { name: string }) {
+  return apiFetch<{ ok: boolean; composition: ApiBuildUnitComposition }>({
+    path:   `/v1/workspaces/unit-compositions/${encodeURIComponent(compositionId)}`,
+    method: "PATCH",
+    accessToken,
+    body
+  });
+}
+
+export async function deleteBuildUnit(accessToken: string, unitId: string) {
+  return apiFetch<{ ok: boolean }>({
+    path:   `/v1/workspaces/units/${encodeURIComponent(unitId)}`,
+    method: "DELETE",
+    accessToken
+  });
+}
+
+export async function unforkBuildUnit(accessToken: string, unitId: string) {
+  const raw = await apiFetch<{ ok: boolean; unit: ApiBuildUnit }>({
+    path:   `/v1/workspaces/units/${encodeURIComponent(unitId)}/unfork`,
+    method: "POST",
+    accessToken
+  });
+  return raw.ok && raw.unit ? { ...raw, unit: normalizeApiBuildUnit(raw.unit) } : raw;
+}
+
+export async function deleteUnitComposition(accessToken: string, compositionId: string) {
+  return apiFetch<{ ok: boolean }>({
+    path:   `/v1/workspaces/unit-compositions/${encodeURIComponent(compositionId)}`,
+    method: "DELETE",
+    accessToken
+  });
+}
+
+export async function sendCompositionToTask(accessToken: string, compositionId: string) {
+  return apiFetch<{ ok: boolean; task: { id: string; title: string; status: string } }>({
+    path:   `/v1/workspaces/unit-compositions/${encodeURIComponent(compositionId)}/send-to-task`,
+    method: "POST",
+    accessToken
   });
 }

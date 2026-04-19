@@ -1,0 +1,58 @@
+config:
+  target: "http://127.0.0.1:8080"
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      name: "moderate_sustained"
+    - duration: 30
+      arrivalRate: 5
+      rampTo: 20
+      name: "spike_ramp"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+  processor: "./artillery.processor.cjs"
+
+scenarios:
+  - name: "http_reflex_burst"
+    weight: 25
+    flow:
+      - post:
+          url: "/v1/chat"
+          beforeRequest: "attachAuth"
+          json:
+            message: "{{ reflex_simple }}"
+            beastLevel: "Smart"
+  - name: "http_normal_chat"
+    weight: 35
+    flow:
+      - post:
+          url: "/v1/chat"
+          beforeRequest: "attachAuth"
+          json:
+            message: "{{ normal_chat }}"
+            beastLevel: "Smart"
+  - name: "http_deep_reasoning"
+    weight: 25
+    flow:
+      - post:
+          url: "/v1/chat"
+          beforeRequest: "attachAuth"
+          json:
+            message: "{{ deep_reasoning }}"
+            beastLevel: "Beast"
+  - name: "http_clarification_and_phased"
+    weight: 15
+    flow:
+      - post:
+          url: "/v1/chat"
+          beforeRequest: "attachAuth"
+          json:
+            message: "{{ ambiguous_clarification }}"
+            beastLevel: "Smart"
+      - post:
+          url: "/v1/chat"
+          beforeRequest: "attachAuth"
+          json:
+            message: "{{ phased_engineering }}"
+            beastLevel: "Beast"

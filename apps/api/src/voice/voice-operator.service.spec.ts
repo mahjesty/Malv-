@@ -13,6 +13,10 @@ describe("VoiceOperatorService confidence downgrade", () => {
     const operatorTargets: any = { create: jest.fn((x: any) => x), save: jest.fn(async (x: any) => ({ id: "target-1", ...x })) };
     const reviewSessions: any = { create: jest.fn((x: any) => x), save: jest.fn() };
     const reviewFindings: any = { create: jest.fn((x: any) => x), save: jest.fn() };
+    const beastWorker: any = { infer: jest.fn() };
+    const inferenceRouting: any = { decideForCallVoiceContinuity: jest.fn() };
+    const cfg: any = { get: jest.fn(() => "0") };
+    const malvTaskRouter: any = { route: jest.fn() };
 
     const svc = new VoiceOperatorService(
       killSwitch,
@@ -25,7 +29,11 @@ describe("VoiceOperatorService confidence downgrade", () => {
       voiceEvents,
       operatorTargets,
       reviewSessions,
-      reviewFindings
+      reviewFindings,
+      beastWorker,
+      inferenceRouting,
+      cfg,
+      malvTaskRouter
     );
     const out = await svc.handleVoiceUtterance({
       userId: "u1",
@@ -50,6 +58,10 @@ describe("VoiceOperatorService confidence downgrade", () => {
     const operatorTargets: any = { create: jest.fn((x: any) => x), save: jest.fn(async (x: any) => ({ id: "target-1", ...x })) };
     const reviewSessions: any = { create: jest.fn((x: any) => x), save: jest.fn() };
     const reviewFindings: any = { create: jest.fn((x: any) => x), save: jest.fn() };
+    const beastWorker: any = { infer: jest.fn() };
+    const inferenceRouting: any = { decideForCallVoiceContinuity: jest.fn() };
+    const cfg: any = { get: jest.fn(() => "0") };
+    const malvTaskRouter: any = { route: jest.fn() };
 
     const svc = new VoiceOperatorService(
       killSwitch,
@@ -62,7 +74,11 @@ describe("VoiceOperatorService confidence downgrade", () => {
       voiceEvents,
       operatorTargets,
       reviewSessions,
-      reviewFindings
+      reviewFindings,
+      beastWorker,
+      inferenceRouting,
+      cfg,
+      malvTaskRouter
     );
     const out = await svc.handleVoiceUtterance({
       userId: "u1",
@@ -103,6 +119,10 @@ describe("VoiceOperatorService confidence downgrade", () => {
     const operatorTargets: any = { create: jest.fn((x: any) => x), save: jest.fn(async (x: any) => ({ id: "target-1", ...x })) };
     const reviewSessions: any = { create: jest.fn((x: any) => x), save: jest.fn() };
     const reviewFindings: any = { create: jest.fn((x: any) => x), save: jest.fn() };
+    const beastWorker: any = { infer: jest.fn() };
+    const inferenceRouting: any = { decideForCallVoiceContinuity: jest.fn() };
+    const cfg: any = { get: jest.fn(() => "0") };
+    const malvTaskRouter: any = { route: jest.fn() };
 
     const svc = new VoiceOperatorService(
       killSwitch,
@@ -115,7 +135,11 @@ describe("VoiceOperatorService confidence downgrade", () => {
       voiceEvents,
       operatorTargets,
       reviewSessions,
-      reviewFindings
+      reviewFindings,
+      beastWorker,
+      inferenceRouting,
+      cfg,
+      malvTaskRouter
     );
     const out = await svc.handleVoiceUtterance({
       userId: "u1",

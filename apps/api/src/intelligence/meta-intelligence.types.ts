@@ -468,4 +468,6 @@ export type MetaRouterInput = {
   lastTaskSummary?: string | null;
   lastContinuityState?: ContinuityIntelligenceLayerOutput["continuityState"] | null;
   sessionId?: string | null;
+  /** When set, durable continuity reads/writes are scoped to this user (conversation-scoped sessions still use sessionId). */
+  continuityOwnerUserId?: string | null;
 };

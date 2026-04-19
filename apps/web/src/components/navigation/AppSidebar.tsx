@@ -7,18 +7,17 @@ import {
   BarChart3,
   Bot,
   Search,
-  LayoutList,
+  LogOut,
   MoreHorizontal,
   Pin,
   Plus,
+  Settings,
   Sparkles,
   UsersRound,
   X,
-  MessageSquare,
   ListChecks,
   Inbox,
   Compass,
-  Settings,
   type LucideIcon
 } from "lucide-react";
 import { ConversationSessionMenu, type SessionMenuActionId } from "./ConversationSessionMenu";
@@ -78,12 +77,10 @@ function PortalLayer(props: { children: ReactNode }) {
 
 function buildMenu(showAdmin: boolean): MenuDef[] {
   const base: MenuDef[] = [
-    { to: "/app/chat", label: "Chat", icon: MessageSquare },
     { to: "/app/tasks", label: "Tasks", icon: ListChecks },
     { to: "/app/inbox", label: "Inbox", icon: Inbox },
     { to: "/app/explore", label: "Explore", icon: Compass },
     { to: "/app/studio", label: "Studio", icon: Sparkles },
-    { to: "/app/conversations", label: "Sessions", icon: LayoutList },
     { to: "/app/collaboration", label: "Collaboration", icon: UsersRound }
   ];
   if (showAdmin) {
@@ -114,9 +111,9 @@ function isLikelyInternalId(value: string | null | undefined) {
   return /^[a-z0-9_-]{20,}$/i.test(v);
 }
 
-/** App shell sidebar — upload MALV layout with real routes, conversations API, and router state. */
-export function AppSidebar(props: { showAdmin: boolean }) {
-  const { accessToken, email: authEmail, displayName: authDisplayName } = useAuth();
+/** App shell sidebar — session history always visible, profile card opens account menu. */
+export default function AppSidebar(props: { showAdmin: boolean }) {
+  const { accessToken, email: authEmail, displayName: authDisplayName, logout } = useAuth();
   const token = accessToken ?? undefined;
   const location = useLocation();
   const navigate = useNavigate();
@@ -125,6 +122,9 @@ export function AppSidebar(props: { showAdmin: boolean }) {
   const mobileOpen = shell?.mobileSidebarOpen ?? false;
   const setMobileOpen = shell?.setMobileSidebarOpen;
   const menu = useMemo(() => buildMenu(props.showAdmin), [props.showAdmin]);
+
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileCardRef = useRef<HTMLDivElement | null>(null);
 
   const newChatShortcutHint =
     typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? "⌘⇧O" : "Ctrl+Shift+O";
@@ -295,6 +295,18 @@ export function AppSidebar(props: { showAdmin: boolean }) {
     const t = window.setTimeout(() => renameInputRef.current?.focus(), 50);
     return () => window.clearTimeout(t);
   }, [dialog]);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      const root = profileCardRef.current;
+      if (root && root.contains(t)) return;
+      setProfileMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, { capture: true });
+    return () => document.removeEventListener("pointerdown", onDown, { capture: true });
+  }, [profileMenuOpen]);
 
   useEffect(() => {
     if (!menuOpenForId) return;
@@ -520,12 +532,13 @@ export function AppSidebar(props: { showAdmin: boolean }) {
       <motion.aside
         data-malv-app-sidebar
         className={[
-          "fixed left-0 top-0 z-50 flex h-[100dvh] max-h-[100dvh] w-[min(100vw-3rem,18rem)] flex-col overflow-hidden border-r lg:static lg:z-0 lg:h-full lg:max-h-none lg:shrink-0 lg:translate-x-0",
+          "fixed left-0 top-0 z-50 flex h-[100dvh] max-h-[100dvh] w-[min(100vw-3rem,18rem)] flex-col overflow-hidden border-r lg:static lg:z-0 lg:h-full lg:max-h-full lg:shrink-0 lg:translate-x-0",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         ].join(" ")}
         style={{
-          background: "oklch(0.06 0.012 260)",
-          borderColor: "oklch(0.18 0.025 260)"
+          background: "rgb(var(--malv-surface-base-rgb))",
+          borderColor: "rgb(var(--malv-border-rgb) / 0.04)",
+          transition: "background-color 220ms ease, border-color 220ms ease"
         }}
         transition={{ type: "spring", damping: 28, stiffness: 320 }}
       >
@@ -606,39 +619,14 @@ export function AppSidebar(props: { showAdmin: boolean }) {
                   )}
                 </NavLink>
               ))}
-            <NavLink
-              to="/app/settings"
-              onClick={closeMobile}
-              className={({ isActive }) =>
-                [
-                  "relative mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-[background-color,color,box-shadow,transform]",
-                  isActive
-                    ? "bg-[linear-gradient(135deg,oklch(0.18_0.03_255/0.92),oklch(0.15_0.03_265/0.9))] text-malv-text/96 ring-1 ring-inset ring-[oklch(0.7_0.18_200/0.32)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_22px_rgba(6,12,24,0.35)] [text-shadow:0_0_12px_rgba(103,191,255,0.18)]"
-                    : "text-malv-text/76 hover:bg-white/[0.05] hover:text-malv-text/92 hover:translate-x-[1px]"
-                ].join(" ")
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  {isActive ? (
-                    <motion.span
-                      layoutId="sidebar-active"
-                      className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r bg-[oklch(0.7_0.18_200)]"
-                    />
-                  ) : null}
-                  <Settings className="h-4 w-4 shrink-0 opacity-90" />
-                  <span className="flex-1 truncate text-left">Settings</span>
-                </>
-              )}
-            </NavLink>
           </div>
         </nav>
 
         <div className="mx-3 shrink-0 py-2">
-          <div className="h-px" style={{ background: "oklch(0.2 0.025 260)" }} />
+          <div className="h-px" style={{ background: "rgb(var(--malv-border-rgb) / 0.08)" }} />
         </div>
 
-        <div className="mx-3 pb-2">
+        <div className="mx-3 shrink-0 pb-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-malv-text/35" />
             <input
@@ -1420,27 +1408,97 @@ export function AppSidebar(props: { showAdmin: boolean }) {
           </div>
         ) : null}
 
-        <div className="shrink-0 border-t p-3" style={{ borderColor: "oklch(0.18 0.025 260)" }}>
-          <div
-            className="flex cursor-default items-center gap-3 rounded-xl p-2.5"
-            style={{ background: "oklch(0.1 0.018 260)" }}
+        <div
+          className="relative shrink-0 p-3"
+          style={{ borderTop: "1px solid rgb(var(--malv-border-rgb) / 0.08)", transition: "border-color 220ms ease" }}
+          ref={profileCardRef}
+        >
+          {/* Account menu — opens above the card */}
+          <AnimatePresence>
+            {profileMenuOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                className="absolute bottom-full left-3 right-3 mb-1.5 overflow-hidden rounded-xl"
+                style={{
+                  background: "rgb(var(--malv-surface-overlay-rgb))",
+                  border: "1px solid rgb(var(--malv-border-rgb) / 0.12)",
+                  boxShadow: "0 -8px 32px rgb(0 0 0 / 0.22)"
+                }}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] transition-colors"
+                  style={{ color: "rgb(var(--malv-text-rgb) / 0.8)" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--malv-text-rgb) / 0.05)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    closeMobile();
+                    navigate("/app/settings");
+                  }}
+                >
+                  <Settings className="h-4 w-4 shrink-0 opacity-60" />
+                  Settings
+                </button>
+                <div className="mx-3 h-px" style={{ background: "rgb(var(--malv-border-rgb) / 0.08)" }} />
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] transition-colors"
+                  style={{ color: "rgb(var(--malv-text-rgb) / 0.7)" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--malv-text-rgb) / 0.05)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    logout("user-initiated");
+                  }}
+                >
+                  <LogOut className="h-4 w-4 shrink-0 opacity-60" />
+                  Sign out
+                </button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors"
+            style={{ background: "rgb(var(--malv-surface-raised-rgb))", transition: "background-color 180ms ease" }}
+            aria-label="Account menu"
+            aria-expanded={profileMenuOpen}
+            onClick={() => setProfileMenuOpen((v) => !v)}
+            onMouseEnter={(e) => {
+              if (!profileMenuOpen) (e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--malv-surface-overlay-rgb))";
+            }}
+            onMouseLeave={(e) => {
+              if (!profileMenuOpen) (e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--malv-surface-raised-rgb))";
+            }}
           >
-            <div className="group relative shrink-0">
-              <div className="absolute inset-[-3px] rounded-full bg-[radial-gradient(circle_at_30%_30%,oklch(0.74_0.16_250/0.4),oklch(0.58_0.14_290/0.08)_62%,transparent_78%)] blur-[5px] transition-all duration-300 group-hover:opacity-100" />
-              <div className="relative h-10 w-10 rounded-full border border-white/[0.14] bg-[oklch(0.11_0.018_260/0.92)] p-[1px] shadow-[inset_0_1px_0_rgba(255,255,255,0.09),0_10px_22px_rgba(0,0,0,0.4)] transition-all duration-200 ease-out group-hover:scale-[1.04] group-hover:border-[oklch(0.72_0.14_240/0.45)] group-hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.13),0_14px_26px_rgba(0,0,0,0.45)]">
-                <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[radial-gradient(circle_at_34%_28%,oklch(0.76_0.14_238/0.2),transparent_56%),radial-gradient(circle_at_68%_76%,oklch(0.64_0.18_292/0.2),transparent_62%),linear-gradient(160deg,oklch(0.16_0.03_255/0.95),oklch(0.1_0.016_262/0.95))]">
-                  <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle,oklch(0.72_0.14_238/0.16),transparent_66%)] animate-pulse" />
-                  <span className="relative text-[13px] font-semibold tracking-[0.03em] text-malv-text/95">{userInitial}</span>
+            <div className="relative shrink-0">
+              <div className="relative h-8 w-8 rounded-full border border-white/[0.12]"
+                style={{ background: "linear-gradient(160deg, oklch(0.16 0.03 255 / 0.95), oklch(0.1 0.016 262 / 0.95))" }}
+              >
+                <div className="flex h-full w-full items-center justify-center">
+                  <span className="text-[12px] font-semibold tracking-wide text-malv-text/90">{userInitial}</span>
                 </div>
               </div>
-              <span className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 rounded-full border border-[oklch(0.08_0.012_260)] bg-emerald-400 shadow-[0_0_0_1px_rgba(6,10,16,0.9),0_0_10px_rgba(52,211,153,0.65)]" />
+              <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-[rgb(var(--malv-surface-base-rgb))] bg-malv-f-live shadow-[0_0_8px_rgb(var(--malv-f-live-rgb)/0.45)]" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-malv-text">{displayName}</p>
-              <p className="truncate text-[11px] text-malv-text/45">{secondaryLabel}</p>
+              <p className="truncate text-[13px] font-medium text-malv-text">{displayName}</p>
+              <p className="truncate text-[11px] text-malv-text/40">{secondaryLabel}</p>
             </div>
-            <MoreHorizontal className="h-4 w-4 shrink-0 text-malv-text/40" aria-hidden />
-          </div>
+            <motion.div
+              animate={{ rotate: profileMenuOpen ? 180 : 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-malv-text/35">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </motion.div>
+          </button>
         </div>
       </motion.aside>
     </>

@@ -7,8 +7,9 @@ import {
   WebSocketGateway,
   WebSocketServer
 } from "@nestjs/websockets";
+import { randomUUID } from "crypto";
 import { Server, Socket } from "socket.io";
-import { forwardRef, Inject, Injectable, Logger } from "@nestjs/common";
+import { forwardRef, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { DataSource } from "typeorm";
 import { ChatService } from "../chat/chat.service";
@@ -23,6 +24,17 @@ import { UserEntity } from "../db/entities/user.entity";
 import { ObservabilityService } from "../common/observability.service";
 import { MalvStudioSessionEntity } from "../db/entities/malv-studio-session.entity";
 import { StudioSessionStreamService } from "../malv-studio/studio-session-stream.service";
+import { MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE } from "../beast/malv-chat-agent-unavailable.constants";
+import { MalvExecutorEnrollmentService } from "../execution-bridge/malv-executor-enrollment.service";
+import type { MalvExecutorEnrollmentChannel } from "../db/entities/malv-user-executor-enrollment.entity";
+import type { MalvBridgeKind } from "../execution-bridge/malv-bridge-capability.types";
+import { buildMalvTransportDecisionSnapshot } from "../chat/malv-transport-parity.util";
+import { MalvValidationTelemetryService } from "../common/malv-validation-telemetry.service";
+import { malvSimulationEnabled, malvWsPhaseProgressEnabled } from "../common/malv-validation-flags.util";
+import { MalvFeatureFlagsService } from "../common/malv-feature-flags.service";
+import { assertMalvAssistantIdentityGate, finalizeAssistantOutput } from "../beast/malv-finalize-assistant-output.util";
+import { resolveMalvCanonicalVisibleAssistantText } from "../beast/malv-canonical-visible-answer.util";
+import { pickMalvRichAssistantMetaForCompletionHandoff } from "../beast/malv-chat-assistant-meta-sanitize.util";
 
 function formatErrorForLog(err: unknown) {
   if (err instanceof Error) {
@@ -30,6 +42,46 @@ function formatErrorForLog(err: unknown) {
   }
   if (err && typeof err === "object") return err as Record<string, unknown>;
   return { message: String(err) };
+}
+
+function isExecutorChannel(v: string): boolean {
+  return v === "browser" || v === "desktop" || v === "mobile";
+}
+
+function normalizeWsTurnOutcome(meta: Record<string, unknown> | null | undefined): "complete" | "partial_done" {
+  const explicitOutcome = typeof meta?.malvTurnOutcome === "string" ? meta.malvTurnOutcome.trim().toLowerCase() : "";
+  if (explicitOutcome === "partial_done" || explicitOutcome === "failed_before_output") {
+    return "partial_done";
+  }
+
+  const cancelledSignals = [
+    meta?.malvStreamCancelled,
+    meta?.cancelled,
+    meta?.malvCancelled,
+    meta?.malvInferenceCancelled
+  ];
+  if (cancelledSignals.some((v) => v === true)) {
+    return "partial_done";
+  }
+
+  const finishReasonCandidate = [meta?.malvLastFinishReason, meta?.finishReason, meta?.finish_reason, meta?.stopReason].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0
+  );
+  if (finishReasonCandidate) {
+    const finishReason = finishReasonCandidate.trim().toLowerCase();
+    const completeFinishReasons = new Set(["stop", "completed", "complete", "done", "success", "eos", "end_turn"]);
+    if (!completeFinishReasons.has(finishReason)) {
+      return "partial_done";
+    }
+  }
+
+  if (explicitOutcome === "complete") {
+    return "complete";
+  }
+
+  // Keep backward compatibility when upstream has no explicit outcome/signal,
+  // while still enforcing partial classification whenever negative terminal clues exist.
+  return "complete";
 }
 
 /** Match `main.ts` HTTP CORS: comma-separated origins, incl. 127.0.0.1 for Vite. */
@@ -80,7 +132,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly voiceStt: VoiceSttSessionService,
     private readonly rateLimit: RateLimitService,
     private readonly dataSource: DataSource,
-    private readonly observability: ObservabilityService
+    private readonly observability: ObservabilityService,
+    private readonly validationTelemetry: MalvValidationTelemetryService,
+    private readonly flags: MalvFeatureFlagsService,
+    @Optional() @Inject(forwardRef(() => MalvExecutorEnrollmentService))
+    private readonly executorEnrollment?: MalvExecutorEnrollmentService
   ) {}
 
   private disconnectWithReason(client: Socket, reason: string) {
@@ -131,6 +187,64 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return { ok: true, userId };
   }
 
+  private bridgeToExecutorChannel(bridge: MalvBridgeKind): MalvExecutorEnrollmentChannel | null {
+    if (bridge === "browser_agent") return "browser";
+    if (bridge === "desktop_agent") return "desktop";
+    if (bridge === "mobile_agent") return "mobile";
+    return null;
+  }
+
+  private sanitizeExecutorDeviceRoomSegment(deviceId: string): string {
+    return deviceId.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
+  }
+
+  /** All executors of a channel for a user (broadcast when no target device). */
+  executorParentRoomName(userId: string, ch: MalvExecutorEnrollmentChannel): string {
+    return `malv_exec:${userId}:${ch}`;
+  }
+
+  /** Single device/tab — server-side targeting for external dispatch. */
+  executorDeviceRoomName(userId: string, ch: MalvExecutorEnrollmentChannel, deviceId: string): string {
+    return `malv_exec:${userId}:${ch}:${this.sanitizeExecutorDeviceRoomSegment(deviceId)}`;
+  }
+
+  private joinExecutorSocketRooms(client: Socket, userId: string, ch: MalvExecutorEnrollmentChannel, deviceId: string | null) {
+    client.join(this.executorParentRoomName(userId, ch));
+    if (deviceId) {
+      client.join(this.executorDeviceRoomName(userId, ch, deviceId));
+    }
+  }
+
+  /**
+   * Connected executor sockets for external dispatch (not the same as any authenticated tab).
+   */
+  countExecutorDispatchTargets(userId: string, bridge: MalvBridgeKind, targetDeviceId: string | null): number {
+    const ch = this.bridgeToExecutorChannel(bridge);
+    if (!ch || !this.server?.sockets?.adapter) return 0;
+    const adapter = this.server.sockets.adapter;
+    const room =
+      targetDeviceId && targetDeviceId.trim().length > 0
+        ? this.executorDeviceRoomName(userId, ch, targetDeviceId)
+        : this.executorParentRoomName(userId, ch);
+    return adapter.rooms.get(room)?.size ?? 0;
+  }
+
+  /**
+   * Emits only to executor room(s) for the bridge; returns recipient socket count (0 if nothing emitted).
+   */
+  emitExternalActionDispatch(userId: string, bridge: MalvBridgeKind, targetDeviceId: string | null, event: string, payload: unknown): number {
+    const ch = this.bridgeToExecutorChannel(bridge);
+    if (!ch || !this.server?.sockets?.adapter) return 0;
+    const room =
+      targetDeviceId && targetDeviceId.trim().length > 0
+        ? this.executorDeviceRoomName(userId, ch, targetDeviceId)
+        : this.executorParentRoomName(userId, ch);
+    const n = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    if (n === 0) return 0;
+    this.server.to(room).emit(event, payload);
+    return n;
+  }
+
   async handleConnection(client: Socket) {
     this.logger.log(`Socket connected: ${client.id}`);
 
@@ -156,11 +270,24 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
             this.disconnectWithReason(client, "stale_token_iat");
             return;
           }
-          (client as any).data = { userId, role, iatSec };
+          const rawChannel = (client.handshake.auth as Record<string, unknown> | undefined)?.malvExecutorChannel;
+          const ch =
+            typeof rawChannel === "string" && isExecutorChannel(rawChannel) ? (rawChannel as MalvExecutorEnrollmentChannel) : null;
+          const rawDev = (client.handshake.auth as Record<string, unknown> | undefined)?.malvExecutorDeviceId;
+          let deviceId =
+            typeof rawDev === "string" && rawDev.trim().length > 0 ? rawDev.trim().slice(0, 128) : null;
+          if (ch === "browser" && !deviceId) {
+            deviceId = "default";
+          }
+          (client as any).data = { userId, role, iatSec, executorChannel: ch ?? undefined, executorDeviceId: deviceId };
           const room = `user:${userId}`;
           client.join(room);
           this.socketsToUser.set(client.id, userId);
           client.emit("presence:state", { online: true, at: Date.now(), userId });
+          if (ch) {
+            this.joinExecutorSocketRooms(client, userId, ch, deviceId);
+            void this.executorEnrollment?.touchHeartbeat(userId, ch, { deviceId });
+          }
           return;
         }
       } catch (e) {
@@ -271,7 +398,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const joined = this.socketStudioSessions.get(client.id) ?? new Set<string>();
     joined.add(payload.sessionId);
     this.socketStudioSessions.set(client.id, joined);
-    const replay = this.studioStream.replayForSession(payload.sessionId);
+    const replay = await this.studioStream.replayForSession(payload.sessionId);
     if (replay.length > 0) {
       client.emit("studio:runtime_replay", { sessionId: payload.sessionId, events: replay });
     }
@@ -721,11 +848,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const userId = auth.userId;
     const assistantMessageId = payload?.assistantMessageId;
     if (!assistantMessageId) return { ok: false, error: "assistantMessageId required" };
-    const cancelled = this.chatRuns.requestCancel({ assistantMessageId, userId });
+    const cancelled = await this.chatRuns.requestCancel({ assistantMessageId, userId });
     this.logger.log(
-      `[MALV RUNTIME] cancel requested userId=${userId} assistantMessageId=${assistantMessageId} applied=${cancelled}`
+      `[MALV RUNTIME] cancel requested userId=${userId} assistantMessageId=${assistantMessageId} applied=${cancelled.localAbortApplied} distributedMarker=${cancelled.distributedMarkerRecorded}`
     );
-    return { ok: cancelled };
+    return {
+      ok: cancelled.ok,
+      localAbortApplied: cancelled.localAbortApplied,
+      distributedMarkerRecorded: cancelled.distributedMarkerRecorded
+    };
   }
 
   @SubscribeMessage("chat:send")
@@ -745,6 +876,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       transcriptChunkRef?: string | null;
       operatorPhase?: string | null;
       userMoodHint?: "stressed" | "calm" | "urgent" | "focused" | "neutral" | null;
+      exploreHandoffJson?: string | null;
     },
     @ConnectedSocket() client: Socket
   ) {
@@ -754,6 +886,18 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       return { ok: false, error: "Unauthorized" };
     }
     const userId = auth.userId;
+    const role = ((client as any).data?.role as "admin" | "user" | undefined) ?? "user";
+    if (role !== "admin") {
+      if (this.flags.internalUsersOnlyMode()) {
+        const allowlist = this.flags.internalUserAllowlist();
+        if (!allowlist.includes(userId)) {
+          return { ok: false, error: "MALV staged rollout is internal-only right now." };
+        }
+      }
+      if (!this.flags.userInRollout(userId)) {
+        return { ok: false, error: "MALV staged rollout gate denied for this account." };
+      }
+    }
     const bucket = await this.rateLimit.check({
       routeKey: "ws.chat.send",
       limitKey: `user:${userId}`,
@@ -780,11 +924,66 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const ac = new AbortController();
     this.chatRuns.registerTurn({ assistantMessageId, userId, abortController: ac });
 
+    this.logger.log(
+      `[MALV E2E] api chat request received (WS chat:send) userId=${userId} conversationId=${payload.conversationId ?? "new"} messageLen=${payload.message?.length ?? 0} ack=immediate replyWillStream=true`
+    );
+
+    void this.runChatSendPipelineAfterAck({
+      userId,
+      client,
+      payload,
+      assistantMessageId,
+      abortController: ac
+    }).finally(() => {
+      void this.chatRuns.unregisterTurn(assistantMessageId);
+    });
+
+    return {
+      ok: true,
+      conversationId: payload.conversationId ?? undefined,
+      replyWillStream: true
+    };
+  }
+
+  /**
+   * Runs after `chat:send` ack so slow inference (e.g. local llama) does not trip the client's ack timeout.
+   */
+  private async runChatSendPipelineAfterAck(args: {
+    userId: string;
+    client: Socket;
+    payload: {
+      conversationId?: string | null;
+      message: string;
+      beastLevel?: "Passive" | "Smart" | "Advanced" | "Beast";
+      workspaceId?: string | null;
+      vaultSessionId?: string | null;
+      inputMode?: "text" | "voice" | "video";
+      sessionType?: string | null;
+      callId?: string | null;
+      audioContext?: string | null;
+      transcriptChunkRef?: string | null;
+      operatorPhase?: string | null;
+      userMoodHint?: "stressed" | "calm" | "urgent" | "focused" | "neutral" | null;
+      exploreHandoffJson?: string | null;
+    };
+    assistantMessageId: string;
+    abortController: AbortController;
+  }) {
+    const { userId, payload, assistantMessageId } = args;
+    const requestReceivedAtMs = Date.now();
+    const room = `user:${userId}`;
+    let wsStreamChunkIndex = 0;
+    let wsStreamAccum = "";
+    let wsStreamChunkQueue = Promise.resolve();
+    let sawAssistantText = false;
+    let turnConversationId: string | null = null;
+    let turnRunId = "";
     try {
-      this.logger.log(
-        `[MALV E2E] api chat request received (WS chat:send) userId=${userId} conversationId=${payload.conversationId ?? "new"} messageLen=${payload.message?.length ?? 0}`
+      const role = ((args.client as any).data?.role as "admin" | "user" | undefined) ?? "user";
+      const simulateMissingWsCallback = malvSimulationEnabled(
+        (k) => process.env[k],
+        "MALV_SIMULATE_WS_CALLBACK_ABSENT"
       );
-      const role = ((client as any).data?.role as "admin" | "user" | undefined) ?? "user";
       const beastRes = await this.chat.handleChat({
         userId,
         userRole: role,
@@ -794,9 +993,37 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         workspaceId: payload.workspaceId ?? null,
         vaultSessionId: payload.vaultSessionId ?? null,
         assistantMessageId,
-        abortSignal: ac.signal,
+        abortSignal: args.abortController.signal,
         runRegistryManagedExternally: true,
         deferAssistantPersist: true,
+        onAssistantStreamChunk: simulateMissingWsCallback
+          ? undefined
+          : (evt) => {
+              wsStreamChunkQueue = wsStreamChunkQueue.then(async () => {
+                if (await this.chatRuns.isCancelled(assistantMessageId)) return;
+                turnConversationId = evt.conversationId;
+                turnRunId = evt.runId;
+                this.validationTelemetry.startTurn({
+                  runId: evt.runId,
+                  transport: "ws",
+                  requestReceivedAtMs
+                });
+                if (evt.text.length > 0) {
+                  sawAssistantText = true;
+                  wsStreamAccum += evt.text;
+                  this.validationTelemetry.markFirstVisibleOutput(evt.runId, "ws");
+                }
+                this.server.to(room).emit("chat:reply_chunk", {
+                  conversationId: evt.conversationId,
+                  assistantMessageId,
+                  runId: evt.runId,
+                  index: wsStreamChunkIndex++,
+                  done: false,
+                  text: evt.text
+                });
+              });
+              return wsStreamChunkQueue;
+            },
         inputMeta: {
           inputMode: payload.inputMode,
           sessionType: payload.sessionType ?? null,
@@ -804,100 +1031,185 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
           audioContext: payload.audioContext ?? null,
           transcriptChunkRef: payload.transcriptChunkRef ?? null,
           operatorPhase: payload.operatorPhase ?? null,
-          userMoodHint: payload.userMoodHint ?? null
+          userMoodHint: payload.userMoodHint ?? null,
+          exploreHandoffJson: payload.exploreHandoffJson ?? null
         }
       });
+      await wsStreamChunkQueue;
 
-      // Basic premium streaming UX: chunk the final reply into segments.
-      // This is real streaming over WebSocket (not a placeholder UI).
-      const reply = beastRes.reply ?? "";
+      const trace = beastRes.meta?.malvInferenceTrace as Record<string, unknown> | undefined;
+      const transport = trace?.malvChatInferenceTransport;
+      const decisionSnapshot = buildMalvTransportDecisionSnapshot(beastRes.meta ?? {});
+      this.validationTelemetry.startTurn({
+        runId: beastRes.runId,
+        transport: "ws",
+        requestReceivedAtMs
+      });
+      this.validationTelemetry.completeTurn({
+        runId: beastRes.runId,
+        transport: "ws",
+        meta: beastRes.meta ?? {},
+        requestReceivedAtMs
+      });
+      const turnOutcome = normalizeWsTurnOutcome((beastRes.meta ?? null) as Record<string, unknown> | null);
       this.logger.log(
-        `[MALV BRAIN] emitting reply to realtime/client userId=${userId} conversationId=${beastRes.conversationId} replyLen=${reply.length} interrupted=${Boolean(beastRes.interrupted)}`
+        `[MALV CHAT WS] pipeline inference done userId=${userId} conversationId=${beastRes.conversationId} transport=${String(transport ?? "unknown")} sawLiveTokens=${sawAssistantText} turnOutcome=${turnOutcome} replyLen=${(beastRes.reply ?? "").length} interrupted=${Boolean(beastRes.interrupted)}`
       );
+
+      const reply = beastRes.reply ?? "";
+      const completionAssistantMeta = pickMalvRichAssistantMetaForCompletionHandoff(
+        (beastRes.meta ?? null) as Record<string, unknown> | null
+      );
+      const completionAssistantMetaSpread =
+        completionAssistantMeta && Object.keys(completionAssistantMeta).length > 0
+          ? { assistantMeta: completionAssistantMeta }
+          : {};
 
       if (beastRes.interrupted) {
+        const rawInterrupted = (wsStreamAccum || reply).trim();
+        const safeInterruptedContent =
+          rawInterrupted.length === 0
+            ? ""
+            : sawAssistantText && wsStreamAccum.trim().length > 0
+              ? finalizeAssistantOutput(wsStreamAccum, {})
+              : assertMalvAssistantIdentityGate(reply);
         this.emitMalvOrchestration(userId, {
           type: "assistant_done",
           conversationId: beastRes.conversationId,
           messageId: assistantMessageId,
-          finalContent: reply,
-          terminal: "interrupted"
+          finalContent: safeInterruptedContent,
+          terminal: "interrupted",
+          malvTurnOutcome: "partial_done",
+          decisionSnapshot,
+          ...completionAssistantMetaSpread
         });
-        this.logger.log(`[MALV CHAT] final state emitted (interrupted, infer abort) userId=${userId}`);
-        return { ok: true, conversationId: beastRes.conversationId, interrupted: true };
+        this.logger.log(
+          `[MALV CHAT] assistant_done emitted (interrupted) userId=${userId} runId=${beastRes.runId} finalized_in_chat_service=true`
+        );
+        return;
       }
 
-      const chunks: string[] = [];
-      const chunkSize = 96;
-      for (let i = 0; i < reply.length; i += chunkSize) chunks.push(reply.slice(i, i + chunkSize));
-      if (chunks.length === 0) {
-        chunks.push("");
-      }
-
-      this.logger.log(
-        `[MALV E2E] emitting assistant reply userId=${userId} conversationId=${beastRes.conversationId} replyLen=${reply.length}`
-      );
-      this.logger.log(`[MALV E2E] chunk count: ${chunks.length}`);
-
-      const room = `user:${userId}`;
       let chunkLoopAborted = false;
-      let streamedText = "";
-      for (let idx = 0; idx < chunks.length; idx++) {
-        if (this.chatRuns.isCancelled(assistantMessageId)) {
-          this.logger.log(`[MALV CHAT] chunk loop stopped (cancel) idx=${idx}`);
-          chunkLoopAborted = true;
-          break;
+      if (!sawAssistantText) {
+        if (reply.length > 0) {
+          if (await this.chatRuns.isCancelled(assistantMessageId)) {
+            this.logger.log(`[MALV CHAT WS] non_streaming_reply_suppressed_cancelled userId=${userId}`);
+            chunkLoopAborted = true;
+          } else {
+            wsStreamAccum = reply;
+            const nonStreamChunk = assertMalvAssistantIdentityGate(reply);
+            this.server.to(room).emit("chat:reply_chunk", {
+              conversationId: beastRes.conversationId,
+              assistantMessageId,
+              runId: beastRes.runId,
+              index: wsStreamChunkIndex++,
+              done: false,
+              text: nonStreamChunk
+            });
+            this.logger.log(
+              `[MALV CHAT WS] non_streaming_full_reply userId=${userId} conversationId=${beastRes.conversationId} len=${reply.length}`
+            );
+          }
+        } else {
+          this.logger.log(
+            `[MALV CHAT WS] non_streaming_empty_reply userId=${userId} conversationId=${beastRes.conversationId}`
+          );
         }
-        const isLast = idx === chunks.length - 1;
-        const piece = chunks[idx] ?? "";
-        streamedText += piece;
-        this.server.to(room).emit("chat:reply_chunk", {
-          conversationId: beastRes.conversationId,
-          assistantMessageId,
-          runId: beastRes.runId,
-          index: idx,
-          done: isLast,
-          text: piece
-        });
-        if (isLast) {
-          this.logger.log(`[MALV E2E] final chunk sent index=${idx} done=true textLen=${(chunks[idx] ?? "").length}`);
-        }
-        await new Promise((r) => setTimeout(r, 14));
+      } else {
+        this.logger.log(
+          `[MALV CHAT WS] live_token_path userId=${userId} conversationId=${beastRes.conversationId} replyLen=${reply.length}`
+        );
       }
 
-      if (chunkLoopAborted) {
-        this.emitMalvOrchestration(userId, {
-          type: "assistant_done",
-          conversationId: beastRes.conversationId,
-          messageId: assistantMessageId,
-          finalContent: streamedText,
-          terminal: "interrupted"
-        });
-        this.logger.log(`[MALV CHAT] final state emitted (interrupted mid-stream) userId=${userId}`);
-      }
+      // Canonical text = orchestrator delivery (reliability + rich + shaping). Raw stream chunks are
+      // progressive hints only; persistence and assistant_done must match HTTP/history.
+      const canonicalPack = resolveMalvCanonicalVisibleAssistantText({
+        orchestratorVisibleReply: reply,
+        streamAccumulatedRaw: wsStreamAccum,
+        sawLiveStreamTokens: sawAssistantText
+      });
+      const persistContent =
+        canonicalPack.text.length > 0 ? canonicalPack.text : assertMalvAssistantIdentityGate(reply);
+      const finalizeStatus = chunkLoopAborted ? ("interrupted" as const) : ("done" as const);
+      const doneTerminal = chunkLoopAborted ? ("interrupted" as const) : ("completed" as const);
+
+      this.emitMalvOrchestration(userId, {
+        type: "assistant_done",
+        conversationId: beastRes.conversationId,
+        messageId: assistantMessageId,
+        finalContent: persistContent,
+        terminal: doneTerminal,
+        malvTurnOutcome: chunkLoopAborted ? "partial_done" : turnOutcome,
+        decisionSnapshot,
+        ...completionAssistantMetaSpread
+      });
+      this.logger.log(
+        `[MALV CHAT] assistant_done emitted userId=${userId} runId=${beastRes.runId} terminal=${doneTerminal} turnOutcome=${chunkLoopAborted ? "partial_done" : turnOutcome}`
+      );
 
       if (beastRes.deferAssistantPersist && !beastRes.interrupted) {
-        await this.chat.finalizeAssistantTurn({
-          userId,
-          conversationId: beastRes.conversationId,
-          assistantMessageId,
-          runId: beastRes.runId,
-          content: chunkLoopAborted ? streamedText : reply,
-          status: chunkLoopAborted ? "interrupted" : "done",
-          meta: beastRes.meta,
-          source: chunkLoopAborted
-            ? "interrupted"
-            : String(beastRes.meta?.malvReplySource ?? "beast_pipeline")
-        });
+        try {
+          await this.chat.finalizeAssistantTurn({
+            userId,
+            conversationId: beastRes.conversationId,
+            assistantMessageId,
+            runId: beastRes.runId,
+            content: persistContent,
+            status: finalizeStatus,
+            malvTurnOutcome: chunkLoopAborted ? "partial_done" : turnOutcome === "partial_done" ? "partial_done" : "complete",
+            meta: beastRes.meta,
+            source: chunkLoopAborted
+              ? "interrupted"
+              : String(beastRes.meta?.malvReplySource ?? "beast_pipeline")
+          });
+        } catch (finalizeErr) {
+          this.logger.error(
+            `[MALV CHAT WS] finalizeAssistantTurn failed after assistant_done userId=${userId} assistantMessageId=${assistantMessageId} detail=${JSON.stringify(formatErrorForLog(finalizeErr))}`
+          );
+        }
       }
-
-      return { ok: true, conversationId: beastRes.conversationId, runId: beastRes.runId };
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      this.emitToUser(userId, "chat:error", { message: errMsg });
-      return { ok: false, error: errMsg };
-    } finally {
-      this.chatRuns.unregisterTurn(assistantMessageId);
+      this.logger.error(
+        `[MALV CHAT WS] pipeline failed userId=${userId} assistantMessageId=${assistantMessageId} detail=${JSON.stringify(formatErrorForLog(e))}`
+      );
+      const cid = turnConversationId ?? payload.conversationId ?? null;
+      if (sawAssistantText && cid) {
+        this.logger.warn(
+          `[MALV CHAT WS] stream_failed_after_output userId=${userId} assistantMessageId=${assistantMessageId} — partial_finalize`
+        );
+        this.emitMalvOrchestration(userId, {
+          type: "assistant_done",
+          conversationId: cid,
+          messageId: assistantMessageId,
+          finalContent: finalizeAssistantOutput(wsStreamAccum, {}),
+          terminal: "completed",
+          malvTurnOutcome: "partial_done",
+          decisionSnapshot: buildMalvTransportDecisionSnapshot({ malvTurnOutcome: "partial_done" })
+        });
+        try {
+          const safePartial = finalizeAssistantOutput(wsStreamAccum, {});
+          await this.chat.finalizeAssistantTurn({
+            userId,
+            conversationId: cid,
+            assistantMessageId,
+            runId: turnRunId || randomUUID(),
+            content: safePartial,
+            status: "done",
+            malvTurnOutcome: "partial_done",
+            meta: { malvStreamPartialError: e instanceof Error ? e.message : String(e) },
+            source: "malv_ws_partial_after_error"
+          });
+        } catch (persistErr) {
+          this.logger.error(
+            `[MALV CHAT WS] partial finalize failed userId=${userId} detail=${JSON.stringify(formatErrorForLog(persistErr))}`
+          );
+        }
+        return;
+      }
+      this.emitToUser(userId, "chat:error", {
+        message: MALV_CHAT_AGENT_UNAVAILABLE_USER_MESSAGE,
+        code: "failed_before_output"
+      });
     }
   }
 
@@ -906,10 +1218,72 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(room).emit(event, payload);
   }
 
+  /** Authenticated sockets only — used for truthful browser_agent capability. */
+  liveAuthenticatedSocketCountForUser(userId: string): number {
+    if (!userId || !this.server?.sockets?.sockets) return 0;
+    let n = 0;
+    for (const [socketId, uid] of this.socketsToUser.entries()) {
+      if (uid !== userId) continue;
+      const sock = this.server.sockets.sockets.get(socketId);
+      if (sock?.connected) n += 1;
+    }
+    return n;
+  }
+
+  @SubscribeMessage("malv:executor_heartbeat")
+  async onExecutorHeartbeat(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { channel?: string; deviceId?: string | null }
+  ) {
+    const auth = await this.requireMutatingSocketUser(client);
+    if (!auth.ok) return { ok: false, error: auth.error };
+    const ch = typeof body?.channel === "string" && isExecutorChannel(body.channel) ? body.channel : null;
+    if (!ch) return { ok: false, error: "invalid_channel" };
+    const rawDev = body?.deviceId;
+    const deviceId =
+      typeof rawDev === "string" && rawDev.trim().length > 0
+        ? rawDev.trim().slice(0, 128)
+        : rawDev === null
+          ? null
+          : undefined;
+    await this.executorEnrollment?.touchHeartbeat(auth.userId, ch as MalvExecutorEnrollmentChannel, { deviceId });
+    return { ok: true, at: Date.now() };
+  }
+
   /** Normalized MALV brain events for web clients (transport-agnostic contract). */
   emitMalvOrchestration(userId: string, payload: Record<string, unknown>) {
     this.logger.log(`[MALV CHAT] malv:orchestration emit userId=${userId} type=${String(payload.type)}`);
     this.emitToUser(userId, "malv:orchestration", payload);
+    this.emitPhasedProgressIfPresent(userId, payload);
+  }
+
+  /**
+   * Truthful WS continuity for deep runs: mirrors server phase transitions that already happened.
+   * This does not invent token streaming; it only projects explicit orchestration milestones.
+   */
+  private emitPhasedProgressIfPresent(userId: string, payload: Record<string, unknown>) {
+    if (!malvWsPhaseProgressEnabled((k) => process.env[k])) return;
+    if (payload.type !== "thinking") return;
+    const rawPhase = typeof payload.phase === "string" ? payload.phase.trim() : "";
+    if (!rawPhase.startsWith("server_phase:")) return;
+    const phaseId = rawPhase.slice("server_phase:".length).trim();
+    if (!phaseId) return;
+    const detail = typeof payload.detail === "string" ? payload.detail : "";
+    const match = detail.match(/(\d+)\s*\/\s*(\d+)/);
+    const phaseIndex = match ? Math.max(0, Number(match[1]) - 1) : null;
+    const phaseTotal = match ? Math.max(1, Number(match[2])) : null;
+    const status = typeof payload.status === "string" ? payload.status : detail.startsWith("completed") ? "completed" : "in_progress";
+    this.emitToUser(userId, "malv:phase_progress", {
+      type: "phase_progress",
+      conversationId: payload.conversationId ?? null,
+      messageId: payload.messageId ?? null,
+      phaseId,
+      phaseIndex,
+      phaseTotal,
+      status,
+      producer: payload.producer ?? null,
+      replyChars: typeof payload.replyChars === "number" ? payload.replyChars : null
+    });
   }
 
   emitToSupportTicket(ticketId: string, event: string, payload: unknown) {

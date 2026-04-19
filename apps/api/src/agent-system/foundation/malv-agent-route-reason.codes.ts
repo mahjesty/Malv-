@@ -1,0 +1,35 @@
+/** Deterministic router / lifecycle reason codes (telemetry-safe). */
+export const MalvAgentRouteReason = {
+  SURFACE_CHAT: "malv.route.surface_chat",
+  SURFACE_TASK: "malv.route.surface_task",
+  SURFACE_INBOX: "malv.route.surface_inbox",
+  SURFACE_STUDIO: "malv.route.surface_studio",
+  SURFACE_IMAGE: "malv.route.surface_image",
+  SURFACE_CALL: "malv.route.surface_call",
+  SURFACE_VOICE: "malv.route.surface_voice",
+  SURFACE_DEVICE: "malv.route.surface_device",
+  SURFACE_BRIDGE: "malv.route.surface_bridge",
+  SURFACE_EXECUTION: "malv.route.surface_execution",
+  SURFACE_RESEARCH: "malv.route.surface_research",
+  VAULT_SENSITIVE: "malv.route.vault_sensitive",
+  LOW_LATENCY: "malv.route.low_latency",
+  MULTIMODAL_INPUT: "malv.route.multimodal_input",
+  HIGH_COMPLEXITY: "malv.route.high_complexity",
+  HIGH_RISK: "malv.route.high_risk",
+  SINGLE_AGENT: "malv.route.single_agent",
+  MULTI_AGENT: "malv.route.multi_agent",
+  TIER_CPU_PREFERRED: "malv.route.tier_cpu_preferred",
+  TIER_GPU_PREFERRED: "malv.route.tier_gpu_preferred",
+  TIER_HYBRID: "malv.route.tier_hybrid",
+  TIER_REFINED_FOR_CAPABILITY: "malv.route.tier_refined_for_capability_profile",
+  CLARIFICATION_MODE: "malv.route.clarification_mode",
+  EXECUTION_PREP_REQUIRED: "malv.route.execution_prep_required",
+  SANDBOX_HANDOFF: "malv.route.sandbox_handoff",
+  CCI_HANDOFF: "malv.route.cci_handoff",
+  DEGRADED_PARTIAL: "malv.route.degraded_partial",
+  TIMEOUT: "malv.route.timeout",
+  CANCELLED: "malv.route.cancelled",
+  STEP_CAP: "malv.route.step_cap"
+} as const;
+
+export type MalvAgentRouteReasonCode = (typeof MalvAgentRouteReason)[keyof typeof MalvAgentRouteReason];

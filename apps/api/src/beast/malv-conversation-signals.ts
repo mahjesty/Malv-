@@ -73,7 +73,20 @@ export function mergeExplicitMoodHint(base: UserToneAnalysis, hint: MalvUserMood
   }
 }
 
-export type IdentityQuestionKind = "name" | "who" | "what" | "capabilities" | "ai";
+export type IdentityQuestionKind =
+  | "name"
+  | "who"
+  | "what"
+  | "capabilities"
+  | "ai"
+  | "creator"
+  | "founder"
+  | "company"
+  | "origin"
+  | "model"
+  | "powered_by"
+  | "based_on"
+  | "comparison";
 
 export type LightSocialKind = "thanks" | "goodnight" | "presence_ping" | "amused_ack";
 
@@ -126,7 +139,16 @@ export function detectLightSocialMessage(message: string): LightSocialKind | nul
   if (/^\s*(you\s+there|you\s+still\s+there|anyone\s+there)\??\s*[!.,]*$/i.test(t)) {
     return "presence_ping";
   }
-  if (/^\s*(lol|lmao|lmfao|haha+|heh)\s*[!.,]*$/i.test(t)) {
+  if (/^\s*(lol|lmao|lmfao|haha+|heh)\s*[!?.]*\s*[!.,]*$/i.test(t)) {
+    return "amused_ack";
+  }
+  if (/^\s*(ok|okay|k)\s*[!?.]*\s*[!.,]*$/i.test(t)) {
+    return "amused_ack";
+  }
+  if (/^\s*(hmm|mmmm?|uh\s*huh)\s*[!?.]*\s*[!.,]*$/i.test(t)) {
+    return "amused_ack";
+  }
+  if (/^\s*(right|got it|makes sense|fair enough)\s*[!?.]*\s*[!.,]*$/i.test(t)) {
     return "amused_ack";
   }
   return null;
@@ -136,18 +158,54 @@ export function detectLightSocialMessage(message: string): LightSocialKind | nul
  * Identity questions that should be answered as MALV (short user turns only).
  * Does not run on bare greetings — orchestrator checks {@link detectSimpleGreeting} first.
  */
+function normalizeForMalvIdentityFuzzy(t: string): string {
+  return t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function detectMalvIdentityQuestion(message: string): IdentityQuestionKind | null {
   if (detectSimpleGreeting(message)) return null;
 
   const t = stripGreetingAndNoise(message);
-  if (t.length > 120) return null;
+  if (t.length > 220) return null;
 
   if (/^(what\s+is|what's|whats)\s+your\s+name$/.test(t)) return "name";
   if (/^your\s+name$/.test(t)) return "name";
-  if (/^who\s+are\s+you$/.test(t)) return "who";
+  if (/^who\s+are\s+you(?:\s+really)?$/.test(t)) return "who";
+  if (/^are\s+you\s+(?:qwen|alibaba|openai|anthropic|claude|gpt|gemini|llama|mistral|deepseek)$/.test(t)) {
+    return "comparison";
+  }
   if (/^what\s+are\s+you$/.test(t)) return "what";
+  if (/^what\s+model\s+are\s+you$/.test(t)) return "model";
   if (/^what\s+do\s+you\s+do\??$/.test(t)) return "capabilities";
+  if (/^who\s+(made|created|developed)\s+you$/.test(t)) return "creator";
+  if (/^who\s+is\s+your\s+creator$/.test(t)) return "creator";
+  if (/^who\s+is\s+your\s+founder$/.test(t)) return "founder";
+  if (/^who\s+is\s+your\s+company$/.test(t)) return "company";
+  if (/^what\s+company\s+built\s+you$/.test(t)) return "company";
+  if (/^where\s+are\s+you\s+from$/.test(t)) return "origin";
+  if (/^what\s+powers\s+you$/.test(t)) return "powered_by";
+  if (/^are\s+you\s+based\s+on\s+another\s+model$/.test(t)) return "based_on";
   if (/^are\s+you\s+(an\s+)?ai\??$/.test(t)) return "ai";
+
+  /** Secondary layer: punctuation-stripped, tightly anchored phrases only (low false-positive rate). */
+  const n = normalizeForMalvIdentityFuzzy(t);
+  if (n.length === 0 || n.length > 120 || n.split(/\s+/).length > 14) return null;
+
+  if (/^are you chatgpt$/.test(n)) return "comparison";
+  if (/^are you gpt(?:[- ]?[0-9]+)?$/.test(n)) return "comparison";
+
+  if (/^who (made|built|created) malv$/.test(n)) return "creator";
+  if (/^what company (made|built|created) (you|malv)$/.test(n)) return "company";
+
+  if (/^who (made|built|created) you(?:$|\s+and\b|\s*,)/.test(n)) return "creator";
+
+  if (/^what is malv$/.test(n)) return "what";
+  if (/^what are you$/.test(n)) return "what";
+
   return null;
 }
 

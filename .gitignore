@@ -15,6 +15,7 @@ coverage
 # Env files
 .env
 .env.*
+!.env.example
 *.local
 
 # Logs
@@ -40,3 +41,7 @@ yarn-error.log*
 
 # Misc
 _premium-import/
+.vercel-explore-ui/
+
+# Local MALV execution agents
+.malv-agent-device-id

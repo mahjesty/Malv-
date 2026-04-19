@@ -78,6 +78,17 @@ import { SecurityAuditEventEntity } from "./entities/security-audit-event.entity
 import { SecurityIncidentEntity } from "./entities/security-incident.entity";
 import { SecurityIncidentEventEntity } from "./entities/security-incident-event.entity";
 import { IntelligenceLearningMemoryEntity } from "./entities/intelligence-learning-memory.entity";
+import { BuildUnitEntity } from "./entities/build-unit.entity";
+import { BuildUnitTaskLinkEntity } from "./entities/build-unit-task-link.entity";
+import { BuildUnitVersionEntity } from "./entities/build-unit-version.entity";
+import { BuildUnitCompositionEntity } from "./entities/build-unit-composition.entity";
+import { SourceIntakeSessionEntity } from "./entities/source-intake-session.entity";
+import { MalvLearningSignalEntity } from "./entities/malv-learning-signal.entity";
+import { MalvUserLearningProfileEntity } from "./entities/malv-user-learning-profile.entity";
+import { MalvUserExecutorEnrollmentEntity } from "./entities/malv-user-executor-enrollment.entity";
+import { MalvUserNotificationEntity } from "./entities/malv-user-notification.entity";
+import { MalvUserContinuityStateEntity } from "./entities/malv-user-continuity-state.entity";
+import { MalvExternalActionDispatchEntity } from "./entities/malv-external-action-dispatch.entity";
 
 // Migration-first data source.
 // Use this with `typeorm migration:run -d src/db/data-source.ts`.
@@ -167,7 +178,18 @@ export const AppDataSource = new DataSource({
     SecurityAuditEventEntity,
     SecurityIncidentEntity,
     SecurityIncidentEventEntity,
-    IntelligenceLearningMemoryEntity
+    IntelligenceLearningMemoryEntity,
+    BuildUnitEntity,
+    BuildUnitTaskLinkEntity,
+    BuildUnitVersionEntity,
+    BuildUnitCompositionEntity,
+    SourceIntakeSessionEntity,
+    MalvLearningSignalEntity,
+    MalvUserLearningProfileEntity,
+    MalvUserExecutorEnrollmentEntity,
+    MalvUserNotificationEntity,
+    MalvUserContinuityStateEntity,
+    MalvExternalActionDispatchEntity
   ],
   migrations: ["src/db/migrations/*.ts"]
 });

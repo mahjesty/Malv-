@@ -5,6 +5,7 @@ import { VoiceOperatorService } from "./voice-operator.service";
 import { VoiceSttSessionService } from "./voice-stt-session.service";
 import { LocalSttService } from "./local-stt/local-stt.service";
 import { LocalTtsService } from "./local-tts/local-tts.service";
+import { VoiceCatalogService } from "./voice-catalog.service";
 import { VoiceTtsController } from "./voice-tts.controller";
 import { VoiceTestTriggerController } from "./voice-test-trigger.controller";
 import { VoicePlaybackService } from "./voice-playback.service";
@@ -15,6 +16,7 @@ import { AuthModule } from "../auth/auth.module";
 import { KillSwitchModule } from "../kill-switch/kill-switch.module";
 import { RealtimeModule } from "../realtime/realtime.module";
 import { BeastModule } from "../beast/beast.module";
+import { InferenceModule } from "../inference/inference.module";
 import { SandboxModule } from "../sandbox/sandbox.module";
 import { AiJobEntity } from "../db/entities/ai-job.entity";
 import { VoiceOperatorEventEntity } from "../db/entities/voice-operator-event.entity";
@@ -23,6 +25,7 @@ import { ReviewFindingEntity } from "../db/entities/review-finding.entity";
 import { OperatorTargetEntity } from "../db/entities/operator-target.entity";
 import { FfmpegNotFoundError, FfmpegService } from "../modules/voice/services/ffmpeg.service";
 import { CallsModule } from "../calls/calls.module";
+import { AgentSystemModule } from "../agent-system/agent-system.module";
 
 @Module({
   imports: [
@@ -32,7 +35,9 @@ import { CallsModule } from "../calls/calls.module";
     forwardRef(() => CallsModule),
     forwardRef(() => RealtimeModule),
     forwardRef(() => BeastModule),
-    forwardRef(() => SandboxModule)
+    forwardRef(() => InferenceModule),
+    forwardRef(() => SandboxModule),
+    forwardRef(() => AgentSystemModule)
   ],
   controllers: [VoiceTtsController, VoiceTestTriggerController],
   providers: [
@@ -44,6 +49,7 @@ import { CallsModule } from "../calls/calls.module";
     VoiceTestTriggerService,
     LocalSttService,
     LocalTtsService,
+    VoiceCatalogService,
     FfmpegService
   ],
   exports: [
@@ -54,6 +60,7 @@ import { CallsModule } from "../calls/calls.module";
     VoiceTriggerService,
     LocalSttService,
     LocalTtsService,
+    VoiceCatalogService,
     FfmpegService
   ]
 })

@@ -4,6 +4,9 @@ export type InferenceFallbackPolicy = "always_allow" | "allow_on_error" | "disab
 
 export type InferenceConfigSource = "env" | "db_override";
 
+/** Who may define the active primary inference chain for worker-facing effective config. */
+export type MalvInferencePrimaryAuthority = "env" | "db_compat";
+
 export type InferenceBackendCapability = {
   backendType: InferenceBackendType;
   supportsText: boolean;
@@ -42,5 +45,12 @@ export type InferenceEffectiveConfig = {
     ok: boolean;
     errors: string[];
   };
+  /** Declares whether DB override may win (`db_compat`) or env is canonical (`env`). */
+  primaryAuthority: MalvInferencePrimaryAuthority;
+  /**
+   * When `primaryAuthority` is `env` but an enabled DB override row still exists, it is **not** applied to the worker.
+   * Surfaces truthfully in admin/health so operators are not misled.
+   */
+  dbOverridePresentButInactive?: boolean;
 };
 

@@ -5,6 +5,7 @@ import { Menu, X, ChevronRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getMalvRegionProps } from "@/lib/studio/malvRegion";
+import { lockBodyScroll } from "@/lib/ui/bodyScrollLock";
 
 const navLinks = [
   { href: "#features", label: "Features" },
@@ -19,13 +20,11 @@ export function Navbar() {
   const [activeSection, setActiveSection] = useState("")
 
   useEffect(() => {
-    if (isMobileMenuOpen) {
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
-    }
+    if (!isMobileMenuOpen) return;
+    const releaseScroll = lockBodyScroll();
+    return () => {
+      releaseScroll();
+    };
   }, [isMobileMenuOpen]);
 
   useEffect(() => {

@@ -1,3 +1,8 @@
+/**
+ * Persists optional **DB compatibility** overrides for primary inference when `MALV_INFERENCE_PRIMARY_AUTHORITY` is unset
+ * or `db_compat` (default). When authority is `env`, `InferenceAdminController` rejects enabling new overrides;
+ * runtime primary targets still come from process env via `InferenceConfigService`.
+ */
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { ConfigService } from "@nestjs/config";

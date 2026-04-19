@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -22,8 +21,9 @@ import { FileUnderstandingService } from "./file-understanding.service";
 import { RetrievalService } from "./retrieval.service";
 import { MultimodalDeepExtractService } from "./multimodal-deep-extract.service";
 import { MalvFeatureFlagsService } from "../common/malv-feature-flags.service";
+import { FILE_UPLOAD_KIND_VALUES, FileUploadMultipartDto } from "./dto/file-upload-multipart.dto";
 
-const fileKindValues = ["pdf", "image", "audio", "video", "doc", "text"] as const;
+const fileKindValues = FILE_UPLOAD_KIND_VALUES;
 
 class RegisterFileDto {
   @IsIn(fileKindValues as any)
@@ -137,15 +137,12 @@ export class FileUnderstandingController {
   async upload(
     @Req() req: Request,
     @UploadedFile() file: { buffer: Buffer; originalname?: string; mimetype?: string } | undefined,
-    @Body() body: { fileKind?: string; workspaceId?: string; roomId?: string }
+    @Body() body: FileUploadMultipartDto
   ) {
     const auth = (req as any).user as { userId: string; role?: string } | undefined;
     if (!auth?.userId) return { ok: false, error: "Unauthorized" };
     if (!file?.buffer?.length) return { ok: false, error: "Missing file" };
-    const fk = body.fileKind as (typeof fileKindValues)[number] | undefined;
-    if (!fk || !(fileKindValues as readonly string[]).includes(fk)) {
-      throw new BadRequestException("fileKind must be one of: " + fileKindValues.join(", "));
-    }
+    const fk = body.fileKind;
     const out = await this.files.persistUploadAndRegister({
       userId: auth.userId,
       globalRole: auth.role === "admin" ? "admin" : "user",

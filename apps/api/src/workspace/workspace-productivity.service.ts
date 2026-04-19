@@ -1,7 +1,15 @@
 import { BadRequestException, ForbiddenException, forwardRef, Inject, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import { WorkspaceTaskEntity, type WorkspaceTaskSource, type WorkspaceTaskStatus } from "../db/entities/workspace-task.entity";
+import {
+  WorkspaceTaskEntity,
+  type WorkspaceTaskExecutionState,
+  type WorkspaceTaskExecutionType,
+  type WorkspaceTaskPriority,
+  type WorkspaceTaskRiskLevel,
+  type WorkspaceTaskSource,
+  type WorkspaceTaskStatus
+} from "../db/entities/workspace-task.entity";
 import {
   WorkspaceApprovalItemEntity,
   type WorkspaceApprovalRiskLevel,
@@ -47,13 +55,24 @@ export class WorkspaceProductivityService {
     title: string;
     description?: string | null;
     status?: WorkspaceTaskStatus;
-    source?: WorkspaceTaskSource;
+    priority?: WorkspaceTaskPriority;
+    source?: WorkspaceTaskSource | string;
+    sourceSurface?: WorkspaceTaskSource | string;
+    sourceType?: string | null;
+    sourceReferenceId?: string | null;
+    executionType?: WorkspaceTaskExecutionType;
     conversationId?: string | null;
     callSessionId?: string | null;
     roomId?: string | null;
     sourceFingerprint?: string | null;
     metadata?: Record<string, unknown> | null;
     assigneeUserId?: string | null;
+    dueAt?: string | Date | null;
+    scheduledFor?: string | Date | null;
+    reminderAt?: string | Date | null;
+    requiresApproval?: boolean;
+    riskLevel?: WorkspaceTaskRiskLevel;
+    tags?: string[] | null;
   }) {
     const title = args.title.trim();
     if (!title) throw new BadRequestException("Task title is required.");
@@ -66,18 +85,31 @@ export class WorkspaceProductivityService {
       });
       if (exists) return exists;
     }
+    const surface = (args.sourceSurface ?? args.source ?? "manual") as WorkspaceTaskSource;
     const row = this.tasks.create({
       user: { id: args.userId } as any,
       title: title.slice(0, 220),
       description: args.description ?? null,
       status: args.status ?? "todo",
-      source: args.source ?? "manual",
+      priority: args.priority ?? "normal",
+      source: surface,
+      sourceSurface: surface,
+      sourceType: args.sourceType ?? null,
+      sourceReferenceId: args.sourceReferenceId ?? null,
+      executionType: args.executionType ?? "manual",
+      executionState: "idle",
       conversationId: args.conversationId ?? null,
       callSessionId: args.callSessionId ?? null,
       roomId: args.roomId ?? null,
       assigneeUserId: args.assigneeUserId ?? null,
       sourceFingerprint: args.sourceFingerprint ?? null,
-      metadata: args.metadata ?? null
+      metadata: args.metadata ?? null,
+      dueAt: args.dueAt ? new Date(args.dueAt) : null,
+      scheduledFor: args.scheduledFor ? new Date(args.scheduledFor) : null,
+      reminderAt: args.reminderAt ? new Date(args.reminderAt) : null,
+      requiresApproval: args.requiresApproval ?? false,
+      riskLevel: args.riskLevel ?? "low",
+      tags: args.tags ?? null
     });
     const saved = await this.tasks.save(row);
     this.realtime.emitToUser(args.userId, "workspace:task_changed", { action: "created", task: saved });
@@ -89,7 +121,7 @@ export class WorkspaceProductivityService {
       conversationId: saved.conversationId ?? null,
       entityId: saved.id,
       title: `Task created: ${saved.title}`,
-      payloadJson: { taskId: saved.id, status: saved.status }
+      payloadJson: { taskId: saved.id, status: saved.status, priority: saved.priority }
     });
     return saved;
   }
@@ -103,13 +135,17 @@ export class WorkspaceProductivityService {
     const content = (msg.content ?? "").trim();
     const derivedTitle = args.title?.trim() || content.slice(0, 120) || "Follow-up from chat output";
     const sourceFingerprint = `chat_output:${msg.id}`;
+    const convId = (msg.conversation as any)?.id ?? null;
     return await this.createTask({
       userId: args.userId,
       title: derivedTitle,
       description: args.description ?? `Created from chat output message ${msg.id}.`,
       status: "todo",
       source: "chat",
-      conversationId: (msg.conversation as any)?.id ?? null,
+      sourceSurface: "chat",
+      sourceType: "conversation",
+      sourceReferenceId: convId,
+      conversationId: convId,
       sourceFingerprint,
       metadata: { sourceMessageId: msg.id }
     });
@@ -121,7 +157,15 @@ export class WorkspaceProductivityService {
     title?: string;
     description?: string | null;
     status?: WorkspaceTaskStatus;
+    priority?: WorkspaceTaskPriority;
+    executionState?: WorkspaceTaskExecutionState;
     assigneeUserId?: string | null;
+    dueAt?: string | Date | null;
+    scheduledFor?: string | Date | null;
+    reminderAt?: string | Date | null;
+    requiresApproval?: boolean;
+    riskLevel?: WorkspaceTaskRiskLevel;
+    tags?: string[] | null;
   }) {
     const row = await this.tasks.findOne({ where: { id: args.taskId, user: { id: args.userId } } });
     if (!row) throw new BadRequestException("Task not found.");
@@ -131,25 +175,48 @@ export class WorkspaceProductivityService {
       row.title = next.slice(0, 220);
     }
     if (args.description !== undefined) row.description = args.description ?? null;
-    if (args.status !== undefined) row.status = args.status;
+    if (args.status !== undefined) {
+      row.status = args.status;
+      if (args.status === "done" && !row.completedAt) row.completedAt = new Date();
+      if (args.status === "archived" && !row.archivedAt) row.archivedAt = new Date();
+    }
+    if (args.priority !== undefined) row.priority = args.priority;
+    if (args.executionState !== undefined) row.executionState = args.executionState;
     if (args.assigneeUserId !== undefined) row.assigneeUserId = args.assigneeUserId;
+    if (args.dueAt !== undefined) row.dueAt = args.dueAt ? new Date(args.dueAt) : null;
+    if (args.scheduledFor !== undefined) row.scheduledFor = args.scheduledFor ? new Date(args.scheduledFor) : null;
+    if (args.reminderAt !== undefined) row.reminderAt = args.reminderAt ? new Date(args.reminderAt) : null;
+    if (args.requiresApproval !== undefined) row.requiresApproval = args.requiresApproval;
+    if (args.riskLevel !== undefined) row.riskLevel = args.riskLevel;
+    if (args.tags !== undefined) row.tags = args.tags ?? null;
     const saved = await this.tasks.save(row);
     this.realtime.emitToUser(args.userId, "workspace:task_changed", { action: "updated", task: saved });
     if (saved.roomId) this.realtime.emitToRoom(saved.roomId, "room:task_changed", { action: "updated", task: saved });
+    const activityType = saved.status === "done"
+      ? "task_completed"
+      : saved.status === "archived"
+        ? "task_updated"
+        : args.assigneeUserId !== undefined
+          ? "task_assigned"
+          : "task_updated";
     await this.activity.record({
       userId: args.userId,
-      activityType: saved.status === "done" ? "task_completed" : args.assigneeUserId !== undefined ? "task_assigned" : "task_updated",
+      activityType,
       roomId: saved.roomId ?? null,
       conversationId: saved.conversationId ?? null,
       entityId: saved.id,
       title: saved.status === "done" ? `Task completed: ${saved.title}` : `Task updated: ${saved.title}`,
-      payloadJson: { taskId: saved.id, status: saved.status, assigneeUserId: saved.assigneeUserId ?? null }
+      payloadJson: { taskId: saved.id, status: saved.status, priority: saved.priority, assigneeUserId: saved.assigneeUserId ?? null }
     });
     return saved;
   }
 
   async markTaskComplete(args: { userId: string; taskId: string }) {
     return await this.updateTask({ userId: args.userId, taskId: args.taskId, status: "done" });
+  }
+
+  async archiveTask(args: { userId: string; taskId: string }) {
+    return await this.updateTask({ userId: args.userId, taskId: args.taskId, status: "archived" });
   }
 
   private mapRisk(raw: string | null | undefined): WorkspaceApprovalRiskLevel {
@@ -356,6 +423,9 @@ export class WorkspaceProductivityService {
       description: "Auto-created from call recap action item.",
       status: "todo",
       source: "call",
+      sourceSurface: "call",
+      sourceType: "call_session",
+      sourceReferenceId: args.callSessionId,
       callSessionId: args.callSessionId,
       conversationId: args.conversationId ?? null,
       sourceFingerprint,

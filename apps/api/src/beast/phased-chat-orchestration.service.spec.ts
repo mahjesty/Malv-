@@ -34,22 +34,33 @@ describe("PhasedChatOrchestrationService", () => {
     const svc = new PhasedChatOrchestrationService(cfg, worker, killSwitch);
     expect(svc.isEnabled()).toBe(true);
 
+    const onPhaseComplete = jest.fn();
     const out = await svc.runWorkerPhases({
       originalUserMessage: "goal",
       phases: ["audit", "plan"],
       mode: "beast",
       baseAggregated: { runId: "r1" },
+      maxTokens: 1200,
       synthesizeFallback: () => ({ reply: "fb", meta: {} }),
-      buildPrompt: (u) => `PROMPT:${u.slice(0, 30)}`
+      buildPrompt: (u) => `PROMPT:${u.slice(0, 30)}`,
+      onPhaseComplete
     });
 
     expect(worker.infer).toHaveBeenCalledTimes(2);
+    expect((worker.infer as jest.Mock).mock.calls[0][0].maxTokens).toBe(1200);
     expect(out.combinedReply).toContain("body-1");
     expect(out.combinedReply).toContain("body-2");
     expect(out.trace).toHaveLength(2);
     expect(out.trace[0]?.status).toBe("completed");
     expect(out.trace[0]?.phaseId).toBe("audit");
     expect(killSwitch.ensureSystemOnOrThrow).toHaveBeenCalledTimes(2);
+    expect(onPhaseComplete).toHaveBeenCalledTimes(2);
+    expect(onPhaseComplete.mock.calls[0][0]).toMatchObject({
+      phaseId: "audit",
+      status: "completed",
+      index: 0,
+      total: 2
+    });
   });
 
   it("is disabled when env not set", () => {

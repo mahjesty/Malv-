@@ -1,4 +1,5 @@
 import type { MalvChatMessage } from "./types";
+import { deriveMalvPresenceAssistantEnergy } from "./malvAssistantUiState";
 
 export type MalvPresencePhase = "idle" | "thinking" | "active";
 export type MalvChannelState = "live" | "offline" | "mock";
@@ -27,11 +28,11 @@ export function computeMalvPresence(args: {
       ? "live"
       : "offline";
 
-  let phase: MalvPresencePhase = "idle";
-  if (args.generationActive) {
-    const la = [...args.messages].reverse().find((m) => m.role === "assistant");
-    phase = la?.status === "streaming" ? "active" : "thinking";
-  }
+  const energy = deriveMalvPresenceAssistantEnergy({
+    generationActive: args.generationActive,
+    messages: args.messages
+  });
+  const phase: MalvPresencePhase = energy === "idle" ? "idle" : energy === "active" ? "active" : "thinking";
 
   // Chat top bar should stay calm: keep only the product name.
   const headline = "MALV";

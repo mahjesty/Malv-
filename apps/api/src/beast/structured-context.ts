@@ -3,7 +3,7 @@
  */
 
 export type StructuredContextSignal = {
-  kind: "vault" | "device" | "support" | "project" | "operator";
+  kind: "vault" | "device" | "support" | "project" | "operator" | "continuity";
   text: string;
 };
 
@@ -29,10 +29,23 @@ function summarizeText(s: string, maxLen: number): string {
   return t.slice(0, maxLen - 1) + "…";
 }
 
+export type FormatStructuredContextOptions = {
+  /**
+   * When false, omit the "Recent thread" block — use when chat history is already sent as priorMessages
+   * (e.g. local OpenAI-compatible path) to avoid duplicating the same turns in the system blob.
+   */
+  includeRecentThread?: boolean;
+};
+
 /**
  * Compact prompt block from structured context; trims recent thread to fit `maxChars`.
  */
-export function formatStructuredContextForPrompt(structured: StructuredContext, maxChars: number): string {
+export function formatStructuredContextForPrompt(
+  structured: StructuredContext,
+  maxChars: number,
+  options?: FormatStructuredContextOptions
+): string {
+  const includeRecentThread = options?.includeRecentThread !== false;
   const lines: string[] = [];
   lines.push(`Summary: ${structured.summary}`);
 
@@ -49,6 +62,14 @@ export function formatStructuredContextForPrompt(structured: StructuredContext, 
       const label = m.title ? `${m.title}` : "note";
       lines.push(`- [${m.scope}] ${label}: ${m.summary}`);
     }
+  }
+
+  if (!includeRecentThread) {
+    let out = lines.join("\n");
+    if (out.length > maxChars) {
+      out = summarizeText(out, maxChars);
+    }
+    return out;
   }
 
   const headerLen = lines.join("\n").length + 32;

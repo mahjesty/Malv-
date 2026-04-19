@@ -306,7 +306,7 @@ export function CallPresenceStage(props: {
       <div className={layout === "stack" ? "space-y-3 lg:max-w-xl lg:mx-auto w-full" : "space-y-3"}>
         <Card elevation="raised" className="space-y-3 border border-white/[0.08] p-5 shadow-panel">
           {phase !== "active" ? (
-            <Button onClick={onStart} disabled={startDisabled || phase === "creating"} className="min-h-[48px] w-full justify-center shadow-glow">
+            <Button onClick={onStart} disabled={startDisabled || phase === "creating"} className="min-h-[48px] w-full justify-center">
               {phase === "creating" ? "Establishing…" : "Establish session"}
             </Button>
           ) : (

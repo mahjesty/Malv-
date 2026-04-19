@@ -1,6 +1,18 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "@tailwindcss/forms";
+@config "../../tailwind.config.js";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+/*
+   * WebKit often treats touches that start on <button> / <a> as belonging to the control first,
+   * so the parent scroll column (e.g. app <main>) does not receive vertical pans.
+   * Allow pan-x + pan-y so horizontal chip rows and vertical page scroll both work from the same control.
+   */
+.malv-scroll-friendly-controls :is(button, a[href]) {
+  touch-action: pan-x pan-y;
+}
 
 /*
   MALV global tokens + base styles.
@@ -14,17 +26,17 @@
   --font-display: "Syne", "Plus Jakarta Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Deep charcoal / graphite / black-blue — high separation from text */
-  --malv-canvas-rgb: 6 8 14;
-  --malv-bg-rgb: 9 11 20;
-  --malv-card-rgb: 20 24 40;
-  --malv-text-rgb: 248 250 255;
-  --malv-muted-rgb: 168 176 200;
+  /* Deep charcoal / near-black stack — layered dark (not flat pure black) */
+  --malv-canvas-rgb: 12 12 14;
+  --malv-bg-rgb: 15 15 17;
+  --malv-card-rgb: 21 21 23;
+  --malv-text-rgb: 240 240 242;
+  --malv-muted-rgb: 148 148 154;
   --malv-border-rgb: 255 255 255;
-  --malv-surface-void-rgb: 4 5 11;
-  --malv-surface-base-rgb: 11 13 22;
-  --malv-surface-raised-rgb: 18 21 36;
-  --malv-surface-overlay-rgb: 26 30 48;
+  --malv-surface-void-rgb: 9 9 11;
+  --malv-surface-base-rgb: 14 14 16;
+  --malv-surface-raised-rgb: 19 19 21;
+  --malv-surface-overlay-rgb: 27 27 30;
   /* Electric blue / indigo / violet accents */
   --malv-brand-rgb: 96 165 250;
   --malv-brand-muted-rgb: 79 70 229;
@@ -32,44 +44,113 @@
   --malv-accent-cyan-rgb: 34 211 238;
   --malv-accent-violet-rgb: 167 139 250;
 
-  /* shadcn/v0-style semantic colors — scoped overrides on .landing-v0 / .auth-page / .malv-dashboard-v0 */
-  --v0-background: oklch(0.08 0.01 260);
-  --v0-foreground: oklch(0.98 0 0);
-  --v0-card: oklch(0.12 0.015 260);
-  --v0-card-foreground: oklch(0.98 0 0);
-  --v0-popover: oklch(0.1 0.01 260);
-  --v0-popover-foreground: oklch(0.98 0 0);
-  --v0-primary: oklch(0.7 0.15 200);
-  --v0-primary-foreground: oklch(0.08 0.01 260);
-  --v0-secondary: oklch(0.18 0.02 260);
-  --v0-secondary-foreground: oklch(0.98 0 0);
-  --v0-muted: oklch(0.2 0.015 260);
+  /* ── Execution panel adaptive surface tokens — dark defaults ── */
+  /* Overridden in html:not(.dark) to use dark-on-light values.   */
+  --malv-exec-surface:       rgba(148, 163, 184, 0.05);
+  --malv-exec-surface-hi:    rgba(148, 163, 184, 0.09);
+  --malv-exec-border:        rgba(148, 163, 184, 0.1);
+  --malv-exec-border-hi:     rgba(148, 163, 184, 0.15);
+  --malv-exec-dot:           rgba(148, 163, 184, 0.18);
+  --malv-exec-divider:       rgba(148, 163, 184, 0.07);
+  --malv-emerald-surface:    rgba(52, 211, 153, 0.05);
+  --malv-emerald-surface-hi: rgba(52, 211, 153, 0.1);
+  --malv-emerald-border:     rgba(52, 211, 153, 0.14);
+  --malv-emerald-border-hi:  rgba(52, 211, 153, 0.22);
+  --malv-rose-surface:       rgba(248, 113, 113, 0.055);
+  --malv-rose-border:        rgba(248, 113, 113, 0.14);
+  --malv-amber-surface:      rgba(251, 191, 36, 0.05);
+  --malv-amber-border:       rgba(251, 191, 36, 0.14);
+
+  /* Scrollbar token */
+  --malv-scrollbar: rgba(255, 255, 255, 0.18);
+
+  /* Transition token for theme switches */
+  --malv-theme-transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease;
+
+  /* shadcn/v0 semantic colors — aligned with image-studio reference (mint primary, cool neutrals) */
+  --v0-background: oklch(0.12 0.005 260);
+  --v0-foreground: oklch(0.95 0 0);
+  --v0-card: oklch(0.16 0.005 260);
+  --v0-card-foreground: oklch(0.95 0 0);
+  --v0-popover: oklch(0.14 0.005 260);
+  --v0-popover-foreground: oklch(0.95 0 0);
+  --v0-primary: oklch(0.72 0.18 165);
+  --v0-primary-foreground: oklch(0.12 0.005 260);
+  --v0-primary-glow: oklch(0.72 0.18 165 / 0.3);
+  --v0-secondary: oklch(0.22 0.008 260);
+  --v0-secondary-foreground: oklch(0.88 0 0);
+  --v0-muted: oklch(0.2 0.005 260);
   --v0-muted-foreground: oklch(0.65 0 0);
-  --v0-accent: oklch(0.7 0.15 200);
-  --v0-accent-foreground: oklch(0.98 0 0);
-  --v0-destructive: oklch(0.577 0.245 27.325);
-  --v0-destructive-foreground: oklch(0.98 0 0);
-  --v0-border: oklch(0.25 0.02 260);
-  --v0-input: oklch(0.15 0.015 260);
-  --v0-ring: oklch(0.7 0.15 200);
+  --v0-accent: oklch(0.72 0.18 165);
+  --v0-accent-foreground: oklch(0.12 0.005 260);
+  --v0-destructive: oklch(0.55 0.22 25);
+  --v0-destructive-foreground: oklch(0.95 0 0);
+  --v0-border: oklch(0.28 0.008 260);
+  --v0-input: oklch(0.2 0.008 260);
+  --v0-ring: oklch(0.72 0.18 165);
 }
 
 html:not(.dark) {
-  --malv-canvas-rgb: 243 245 250;
-  --malv-bg-rgb: 252 252 255;
-  --malv-card-rgb: 255 255 255;
-  --malv-text-rgb: 12 16 30;
-  --malv-muted-rgb: 72 80 102;
-  --malv-border-rgb: 15 23 42;
-  --malv-surface-void-rgb: 236 239 247;
-  --malv-surface-base-rgb: 252 252 255;
-  --malv-surface-raised-rgb: 255 255 255;
-  --malv-surface-overlay-rgb: 246 248 253;
-  --malv-brand-rgb: 59 130 246;
-  --malv-brand-muted-rgb: 67 56 202;
-  --malv-brand2-rgb: 14 165 233;
-  --malv-accent-cyan-rgb: 8 145 178;
+  /*
+   * Light mode surface hierarchy — 4 distinct layers.
+   * Each layer has a clearly different value so the eye reads depth,
+   * not a flat expanse of identical grays.
+   *
+   *  Layer 1 (deepest/page)  → surface-void  : warm off-white  237 236 233
+   *  Layer 2 (content area)  → bg             : lighter warm    248 247 245
+   *  Layer 3 (cards)         → card / canvas  : pure white      255 255 255
+   *  Layer 4 (elevated panel)→ canvas (panel) : pure white      255 255 255  + shadow
+   */
+
+  /* Page canvas — warm off-white; makes white cards and panels lift off */
+  --malv-surface-void-rgb: 237 236 233;
+
+  /* Main content area — one step lighter than the page floor */
+  --malv-bg-rgb: 248 247 245;
+
+  /* Elevated surfaces: cards, panels, drawers — pure white */
+  --malv-canvas-rgb:          255 255 255;
+  --malv-card-rgb:            255 255 255;
+  --malv-surface-base-rgb:    255 255 255;
+  --malv-surface-raised-rgb:  255 255 255;
+  --malv-surface-overlay-rgb: 252 251 249;
+
+  /* ── Text contrast tiers ── */
+  /* Primary: near-black, maximum legibility */
+  --malv-text-rgb:  10 10 14;
+  /* Muted base: pure black used with opacity for secondary/meta tiers.
+     rgb(0 0 0 / 0.45) ≈ medium gray, rgb(0 0 0 / 0.28) ≈ subtle meta. */
+  --malv-muted-rgb:  0  0  0;
+  --malv-border-rgb: 15 15 15;
+
+  /* ── Brand / accent ── */
+  --malv-brand-rgb:         59 130 246;
+  --malv-brand-muted-rgb:   67 56 202;
+  --malv-brand2-rgb:        14 165 233;
+  --malv-accent-cyan-rgb:   8 145 178;
   --malv-accent-violet-rgb: 109 40 217;
+
+  /* ── Execution panel tokens — light overrides ──
+     Dark mode uses light-on-dark overlays (slate tints).
+     Light mode uses dark-on-light overlays (black with low opacity).  */
+  --malv-exec-surface:       rgba(0, 0, 0, 0.034);
+  --malv-exec-surface-hi:    rgba(0, 0, 0, 0.055);
+  --malv-exec-border:        rgba(0, 0, 0, 0.09);
+  --malv-exec-border-hi:     rgba(0, 0, 0, 0.14);
+  --malv-exec-dot:           rgba(0, 0, 0, 0.15);
+  --malv-exec-divider:       rgba(0, 0, 0, 0.08);
+  /* Accent surfaces: slightly higher opacity so tints read on white */
+  --malv-emerald-surface:    rgba(16, 185, 129, 0.09);
+  --malv-emerald-surface-hi: rgba(16, 185, 129, 0.14);
+  --malv-emerald-border:     rgba(16, 185, 129, 0.22);
+  --malv-emerald-border-hi:  rgba(16, 185, 129, 0.32);
+  --malv-rose-surface:       rgba(220, 38, 38, 0.07);
+  --malv-rose-border:        rgba(220, 38, 38, 0.18);
+  --malv-amber-surface:      rgba(217, 119, 6, 0.08);
+  --malv-amber-border:       rgba(217, 119, 6, 0.2);
+
+  /* ── Scrollbar ── */
+  --malv-scrollbar: rgba(0, 0, 0, 0.12);
 }
 
 html,
@@ -77,50 +158,207 @@ body {
   height: 100%;
 }
 
-/* Use token RGB directly — avoids @apply on custom theme colors (more stable across Tailwind/PostCSS). */
+/*
+ * Light mode: body uses the warm page floor, not the elevated white canvas.
+ * This creates the contrast that makes white cards and panels visually lift.
+ */
+html:not(.dark) body {
+  background-color: rgb(var(--malv-surface-void-rgb));
+}
+
+/*
+ * Light mode: runtime execution panel — strong white surface elevated above the page.
+ * Shadow replaces the near-invisible dark-mode rgba overlay that creates separation.
+ */
+html:not(.dark) .malv-runtime-panel {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    0 20px 56px rgba(0, 0, 0, 0.14) !important;
+}
+
+/* ── Light mode: sidebar ────────────────────────────────────────────────────
+   The dark-mode sidebar uses white/black overlays that vanish or clash in
+   light mode. These overrides restore legibility without touching the JSX.   */
+
+/* Active main-nav item — replace dark oklch gradient with a neutral tint */
+html:not(.dark) [data-malv-app-sidebar] nav [aria-current="page"] {
+  background: rgba(0, 0, 0, 0.07) !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.11) inset !important;
+  color: rgb(10, 10, 14) !important;
+  text-shadow: none !important;
+}
+
+/* Inactive main-nav item hover */
+html:not(.dark) [data-malv-app-sidebar] nav a:not([aria-current="page"]):hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: rgb(10, 10, 14) !important;
+}
+
+/* Active conversation/session item (ring-1 ring-inset active state) */
+html:not(.dark) [data-malv-app-sidebar] .ring-1.ring-inset {
+  background: rgba(0, 0, 0, 0.07) !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.11) inset !important;
+  color: rgb(10, 10, 14) !important;
+  text-shadow: none !important;
+}
+
+/* Inactive conversation item hover */
+html:not(.dark) [data-malv-app-sidebar] .min-h-0 a:not(.ring-1):hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* "New Chat" button — bg-white/[0.05] is invisible on white sidebar */
+html:not(.dark) [data-malv-app-sidebar] a[href*="chat?fresh=1"] {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  box-shadow: none !important;
+}
+html:not(.dark) [data-malv-app-sidebar] a[href*="chat?fresh=1"]:hover {
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Search input */
+html:not(.dark) [data-malv-app-sidebar] input {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: rgb(10, 10, 14) !important;
+}
+html:not(.dark) [data-malv-app-sidebar] input::placeholder {
+  color: rgba(0, 0, 0, 0.35) !important;
+}
+html:not(.dark) [data-malv-app-sidebar] input:focus {
+  border-color: rgb(var(--malv-f-ring-live-rgb) / 0.45) !important;
+  box-shadow: 0 0 0 2px rgb(var(--malv-f-live-rgb) / 0.14) !important;
+}
+
+/* Loading skeleton pulses — bg-white/[0.06] is invisible on white */
+html:not(.dark) [data-malv-app-sidebar] .animate-pulse {
+  background: rgba(0, 0, 0, 0.07) !important;
+}
+
+/* ── Light mode: task cards ──────────────────────────────────────────────────
+   Default queued cards use a 0.09-opacity border and a 0.04-opacity shadow —
+   both effectively invisible against a white card on a warm-gray page.        */
+
+/* All task cards: visible depth shadow */
+html:not(.dark) .malv-task-card {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.09), 0 0 0 1px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Neutral (queued / completed) cards: stronger border */
+html:not(.dark) .malv-task-card-neutral {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Light mode: task input — neutral visible surface, no glow on focus */
+html:not(.dark) .malv-task-input-surface {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .malv-task-input-surface:focus-within {
+  border-color: rgba(0, 0, 0, 0.18) !important;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Light mode: edit bubble focus — restrained ring, not blue neon glow */
+html:not(.dark) .malv-edit-bubble:focus-within {
+  border-color: rgba(0, 0, 0, 0.14);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.07);
+}
+
+/* Typography + smoothing — background/color come from `.theme` body (shadcn) + `.dark` tokens */
 body {
-  background-color: rgb(var(--malv-canvas-rgb));
-  color: rgb(var(--malv-text-rgb));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "ss01" on, "cv01" on;
+  transition: var(--malv-theme-transition);
 }
 
 ::selection {
-  background: rgba(96, 165, 250, 0.35);
+  background: rgb(var(--malv-f-live-rgb) / 0.28);
   color: rgb(var(--malv-text-rgb));
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(248, 250, 255, 0.22) transparent;
+  scrollbar-color: var(--malv-scrollbar) transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(248, 250, 255, 0.18);
+  background: var(--malv-scrollbar);
   border-radius: 999px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: padding-box;
 }
 
-@layer utilities {
-  /*
-    Focus ring: plain box-shadow matches ring-2 + ring-brand/35 + ring-offset-2 + offset color = bg.
-    Do not use @apply ring-offset-[rgb(var(--malv-bg-rgb))] — breaks Tailwind when var() is inside arbitrary brackets.
-  */
-  .malv-focus-ring {
-    outline: none;
-    box-shadow:
-      0 0 0 2px rgb(var(--malv-bg-rgb)),
-      0 0 0 4px rgb(var(--malv-brand-rgb) / 0.45);
-  }
+/*
+  Focus ring: plain box-shadow matches ring-2 + ring-brand/35 + ring-offset-2 + offset color = bg.
+  Do not use @apply ring-offset-[rgb(var(--malv-bg-rgb))] — breaks Tailwind when var() is inside arbitrary brackets.
+*/
+.malv-focus-ring {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgb(var(--malv-bg-rgb)),
+    0 0 0 4px var(--malv-state-focus-ring),
+    0 0 20px var(--malv-state-focus-glow);
 }
 
-@layer components {
+/*
+    Task capture input surface — no focus ring, no glow, no border color change.
+    Uses !important to override browser UA stylesheet and any form-plugin defaults.
+  */
+  .malv-archive-btn {
+    color: rgb(var(--malv-muted-rgb));
+    background: transparent;
+    transition: color 150ms ease, background-color 150ms ease;
+  }
+
+  .malv-archive-btn:hover {
+    color: rgb(var(--malv-text-rgb));
+    background: rgb(var(--malv-border-rgb) / 0.07);
+  }
+
+  /* Running task shimmer — subtle sweep animation for active execution cards */
+  @keyframes malv-task-shimmer {
+    0%   { opacity: 0;   transform: translateX(-100%); }
+    40%  { opacity: 1; }
+    100% { opacity: 0;   transform: translateX(100%); }
+  }
+
+  .malv-task-input-surface {
+    outline: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .malv-task-input-surface:focus-within {
+    outline: none !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+  }
+
+  .malv-task-input-field {
+    -webkit-appearance: none;
+    appearance: none;
+    outline: none;
+    box-shadow: none;
+    border: none;
+    background: transparent;
+  }
+
+  .malv-task-input-field:focus,
+  .malv-task-input-field:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
   /*
     Edit textarea must never inherit default/browser or forms-plugin blue glow.
     Keep feedback on container (.malv-edit-bubble:focus-within), not the field.
@@ -147,46 +385,215 @@ body {
       0 12px 40px rgba(0, 0, 0, 0.28),
       0 0 0 1px rgba(255, 255, 255, 0.06);
   }
-}
+
+  /*
+   * Explore command bar — one segmented control surface; focus on the shell,
+   * not a neon input ring. Subtle live-accent wash matches MALV interaction energy.
+   */
+  .malv-explore-command-bar {
+    position: relative;
+    border-radius: 0.875rem;
+    border: 1px solid rgb(var(--malv-border-rgb) / 0.13);
+    background: linear-gradient(
+      165deg,
+      rgb(var(--malv-surface-overlay-rgb) / 0.38) 0%,
+      rgb(var(--malv-surface-raised-rgb)) 52%,
+      rgb(var(--malv-surface-base-rgb) / 0.94) 100%
+    );
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.04) inset,
+      0 10px 36px -28px rgb(0 0 0 / 0.55);
+    transition: border-color 200ms ease, box-shadow 240ms ease, background 240ms ease;
+  }
+
+  @media (min-width: 640px) {
+    .malv-explore-command-bar {
+      border-radius: 1rem;
+    }
+  }
+
+  html:not(.dark) .malv-explore-command-bar {
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.82) inset,
+      0 1px 2px rgb(0 0 0 / 0.035),
+      0 14px 40px -30px rgb(0 0 0 / 0.1);
+  }
+
+  .malv-explore-command-bar:hover:not(:focus-within) {
+    border-color: rgb(var(--malv-border-rgb) / 0.17);
+  }
+
+  .malv-explore-command-bar:focus-within {
+    border-color: rgb(var(--malv-border-rgb) / 0.26);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.055) inset,
+      0 0 0 1px rgb(var(--malv-border-rgb) / 0.09),
+      0 0 28px -16px rgb(var(--malv-f-live-rgb) / 0.12),
+      0 10px 44px -26px rgb(0 0 0 / 0.5);
+  }
+
+  html:not(.dark) .malv-explore-command-bar:focus-within {
+    border-color: rgb(var(--malv-border-rgb) / 0.3);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.92) inset,
+      0 0 0 1px rgb(0 0 0 / 0.055),
+      0 0 32px -14px rgb(var(--malv-f-live-rgb) / 0.1),
+      0 6px 28px -14px rgb(0 0 0 / 0.07);
+  }
+
+  .malv-explore-command-divider {
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgb(var(--malv-border-rgb) / 0.11) 20%,
+      rgb(var(--malv-border-rgb) / 0.11) 80%,
+      transparent 100%
+    );
+  }
+
+  .malv-explore-command-field {
+    -webkit-appearance: none;
+    appearance: none;
+    outline: none;
+    box-shadow: none;
+    border: none;
+    background: transparent;
+  }
+
+  .malv-explore-command-field::-webkit-search-cancel-button,
+  .malv-explore-command-field::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+    display: none;
+  }
+
+  .malv-explore-command-field:focus,
+  .malv-explore-command-field:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .malv-explore-workflow-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2rem;
+    padding: 0.35rem 0.62rem 0.35rem 0.52rem;
+    border-radius: 0.5rem;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.012em;
+    white-space: nowrap;
+    color: rgb(var(--malv-muted-rgb) / 0.9);
+    background: rgb(var(--malv-border-rgb) / 0.035);
+    border: 1px solid rgb(var(--malv-border-rgb) / 0.1);
+    transition:
+      color 180ms ease,
+      background-color 180ms ease,
+      border-color 180ms ease,
+      box-shadow 220ms ease,
+      opacity 180ms ease;
+  }
+
+  @media (min-width: 640px) {
+    .malv-explore-workflow-cta {
+      min-height: 2.125rem;
+      padding: 0.4rem 0.72rem 0.4rem 0.62rem;
+      font-size: 11.5px;
+      border-radius: 0.5625rem;
+    }
+  }
+
+  .malv-explore-workflow-cta:hover:not(:disabled) {
+    color: rgb(var(--malv-text-rgb) / 0.9);
+    background: rgb(var(--malv-border-rgb) / 0.065);
+    border-color: rgb(var(--malv-border-rgb) / 0.15);
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset;
+  }
+
+  .malv-explore-workflow-cta:disabled {
+    opacity: 0.34;
+    cursor: not-allowed;
+  }
+
+  .malv-explore-workflow-cta:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px rgb(var(--malv-bg-rgb)),
+      0 0 0 4px rgb(var(--malv-f-ring-live-rgb) / 0.38);
+  }
+
+  .malv-explore-command-clear {
+    color: rgb(var(--malv-muted-rgb) / 0.48);
+    transition: color 160ms ease, background-color 160ms ease;
+  }
+
+  .malv-explore-command-clear:hover {
+    color: rgb(var(--malv-text-rgb) / 0.75);
+    background: rgb(var(--malv-border-rgb) / 0.06);
+  }
+
+  .malv-explore-command-clear:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px rgb(var(--malv-bg-rgb)),
+      0 0 0 4px rgb(var(--malv-f-ring-live-rgb) / 0.32);
+    border-radius: 0.5rem;
+  }
+
+  /* Image explore thread + preview wells — same layered charcoal as the rest of MALV */
+  .malv-explore-thread-surface {
+    background: linear-gradient(
+      to bottom,
+      rgb(var(--malv-surface-base-rgb) / 0.82),
+      rgb(var(--malv-surface-raised-rgb) / 0.9),
+      rgb(var(--malv-surface-void-rgb) / 0.94)
+    );
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgb(var(--malv-border-rgb) / 0.07);
+  }
 
 /* Authenticated MALV app background (scoped to /app/* via `AppLayout`) */
 .malv-app-shell {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background: #0b0b0f;
-  isolation: isolate; /* allow `z-index: -1` background layer to render predictably */
+  background: rgb(var(--malv-canvas-rgb));
+  transition: background-color 220ms ease;
+  isolation: isolate;
 }
 
 .malv-app-bg {
   position: fixed;
   inset: 0;
-  /* Flat near-black. Avoid noisy gradients/glow for ChatGPT-like dark mode. */
-  background: #0b0b0f;
+  background: rgb(var(--malv-canvas-rgb));
+  transition: background-color 220ms ease;
   z-index: -1;
   pointer-events: none;
-  /* no blur: keep UI crisp/minimal */
 }
 
-/* Ensure the authenticated shell's base canvas is cinematic-black. */
+/* Ensure the authenticated shell's base canvas uses the theme canvas token. */
 .malv-app-shell .bg-malv-canvas {
-  background-color: #0b0b0f !important;
+  background-color: rgb(var(--malv-canvas-rgb)) !important;
 }
 
-/* The /app home uses v0 `bg-background`; keep it near-black to match the shell. */
+/* The /app home uses v0 `bg-background`; align with the shell canvas. */
 .malv-app-shell .landing-v0.bg-background {
-  background-color: #0b0b0f !important;
+  background-color: rgb(var(--malv-canvas-rgb)) !important;
 }
 
-/* Remove blue radial background image in non-immersive mode. */
+/* Remove radial background image in non-immersive mode — keep clean. */
 .malv-app-shell .bg-malv-radial {
-  background-color: #0b0b0f !important;
+  background-color: rgb(var(--malv-canvas-rgb)) !important;
   background-image: none !important;
 }
 
-/* Remove blue glow gradients in immersive chat mode. */
+/* Remove operator glow gradients in immersive chat mode. */
 .malv-app-shell .malv-operator-chat-bg {
-  background: #0b0b0f !important;
+  background: rgb(var(--malv-canvas-rgb)) !important;
   background-image: none !important;
 }
 
@@ -207,11 +614,27 @@ body {
   --malv-chat-surface-highlight: rgba(255, 255, 255, 0.75);
   --malv-chat-surface-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
   --malv-chat-surface-shadow-hover: 0 10px 30px rgba(0, 0, 0, 0.1);
-  --malv-chat-composer-bg: rgba(255, 255, 255, 0.74);
-  --malv-chat-composer-border: rgba(0, 0, 0, 0.08);
-  --malv-chat-composer-border-strong: rgba(0, 0, 0, 0.13);
-  --malv-chat-composer-shadow: 0 16px 40px rgba(0, 0, 0, 0.09);
-  --malv-chat-composer-shadow-focus: 0 22px 50px rgba(0, 0, 0, 0.13);
+  --malv-chat-composer-bg: rgba(255, 255, 255, 0.82);
+  --malv-chat-composer-border: rgba(0, 0, 0, 0.1);
+  --malv-chat-composer-border-strong: rgba(0, 0, 0, 0.15);
+  --malv-chat-composer-border-hover: rgba(0, 0, 0, 0.13);
+  --malv-chat-composer-border-focus: rgba(0, 0, 0, 0.2);
+  --malv-chat-composer-inner-highlight: rgba(255, 255, 255, 0.62);
+  --malv-chat-composer-inner-glow: rgba(255, 255, 255, 0.09);
+  --malv-chat-composer-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.1),
+    0 2px 10px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  --malv-chat-composer-shadow-hover:
+    0 20px 48px rgba(0, 0, 0, 0.12),
+    0 4px 14px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --malv-chat-composer-shadow-focus:
+    0 24px 56px rgba(0, 0, 0, 0.14),
+    0 4px 16px rgba(0, 0, 0, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --malv-chat-composer-accent-glow: rgb(var(--malv-f-live-rgb) / 0.2);
+  --malv-chat-composer-accent-ring: rgb(var(--malv-f-ring-live-rgb) / 0.38);
   --malv-chat-action-icon-muted: rgba(0, 0, 0, 0.42);
   --malv-chat-action-icon-strong: rgba(0, 0, 0, 0.76);
   --malv-chat-action-icon-shadow: rgba(0, 0, 0, 0.18);
@@ -233,11 +656,27 @@ body {
   --malv-chat-surface-highlight: rgba(255, 255, 255, 0.06);
   --malv-chat-surface-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
   --malv-chat-surface-shadow-hover: 0 14px 34px rgba(0, 0, 0, 0.38);
-  --malv-chat-composer-bg: rgba(255, 255, 255, 0.035);
-  --malv-chat-composer-border: rgba(255, 255, 255, 0.08);
-  --malv-chat-composer-border-strong: rgba(255, 255, 255, 0.15);
-  --malv-chat-composer-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
-  --malv-chat-composer-shadow-focus: 0 22px 56px rgba(0, 0, 0, 0.5);
+  --malv-chat-composer-bg: rgba(255, 255, 255, 0.055);
+  --malv-chat-composer-border: rgba(255, 255, 255, 0.12);
+  --malv-chat-composer-border-strong: rgba(255, 255, 255, 0.2);
+  --malv-chat-composer-border-hover: rgba(255, 255, 255, 0.15);
+  --malv-chat-composer-border-focus: rgba(255, 255, 255, 0.26);
+  --malv-chat-composer-inner-highlight: rgba(255, 255, 255, 0.12);
+  --malv-chat-composer-inner-glow: rgb(var(--malv-f-live-rgb) / 0.09);
+  --malv-chat-composer-shadow:
+    0 22px 52px rgba(0, 0, 0, 0.55),
+    0 6px 18px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  --malv-chat-composer-shadow-hover:
+    0 28px 62px rgba(0, 0, 0, 0.58),
+    0 8px 22px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(255, 255, 255, 0.055) inset;
+  --malv-chat-composer-shadow-focus:
+    0 30px 68px rgba(0, 0, 0, 0.6),
+    0 8px 24px rgba(0, 0, 0, 0.38),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  --malv-chat-composer-accent-glow: rgb(var(--malv-f-live-rgb) / 0.28);
+  --malv-chat-composer-accent-ring: rgb(var(--malv-f-ring-live-rgb) / 0.45);
   --malv-chat-action-icon-muted: rgba(255, 255, 255, 0.42);
   --malv-chat-action-icon-strong: rgba(255, 255, 255, 0.82);
   --malv-chat-action-icon-shadow: rgba(0, 0, 0, 0.35);
@@ -447,34 +886,213 @@ body {
 }
 
 .malv-chat-composer-dock {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  box-shadow: none;
 }
 
-.malv-input-dock {
-  background: var(--malv-chat-composer-bg);
-  border: 1px solid var(--malv-chat-composer-border);
-  border-radius: 999px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+/*
+ * Explore image studio prompt — @tailwindcss/forms adds a default blue ring via
+ * --tw-ring-* + box-shadow on textarea:focus; reset all of it.
+ */
+#explore-img-prompt,
+#explore-img-prompt:focus,
+#explore-img-prompt:focus-visible {
+  border-width: 0 !important;
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-inset: initial !important;
+  --tw-ring-offset-width: 0px !important;
+  --tw-ring-offset-color: transparent !important;
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+#explore-img-prompt {
+  caret-color: rgb(var(--malv-f-live-rgb));
+}
+
+/* Image studio prompt chrome — focus glow lives on the shell (textarea ring is reset above). */
+.explore-img-prompt-shell {
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.dark .explore-img-prompt-shell:focus-within {
+  border-color: rgb(var(--malv-f-ring-live-rgb) / 0.38);
   box-shadow:
-    var(--malv-chat-composer-shadow),
-    0 0 0 1px var(--malv-chat-surface-highlight) inset;
-  transition: all 160ms ease;
+    0 22px 56px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgb(var(--malv-f-ring-live-rgb) / 0.28),
+    0 0 44px rgb(var(--malv-f-live-rgb) / 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.malv-input-dock:focus-within {
-  border-color: var(--malv-chat-composer-border-strong);
+html:not(.dark) .explore-img-prompt-shell:focus-within {
+  border-color: rgb(var(--malv-f-ring-live-rgb) / 0.42);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgb(var(--malv-f-ring-live-rgb) / 0.22),
+    0 0 36px rgb(var(--malv-f-live-rgb) / 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+/* Chat composer dock — only used by OperatorChatComposer */
+.malv-chat-composer-shell.malv-input-dock {
+  position: relative;
+  isolation: isolate;
+  border-radius: 1rem;
+  border: 1px solid var(--malv-chat-composer-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 52%),
+    var(--malv-chat-composer-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--malv-chat-composer-shadow);
+  transition:
+    box-shadow 200ms ease,
+    border-color 200ms ease,
+    filter 200ms ease,
+    background-color 200ms ease;
+}
+
+.malv-chat-composer-shell.malv-input-dock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.05) 0%, transparent 42%, transparent 100%);
+  opacity: 1;
+}
+
+.malv-chat-composer-shell.malv-input-dock::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  box-shadow:
+    inset 0 1px 0 var(--malv-chat-composer-inner-highlight),
+    inset 0 0 36px var(--malv-chat-composer-inner-glow);
+  transition: box-shadow 200ms ease;
+}
+
+.malv-chat-composer-shell.malv-input-dock:focus-within::after {
+  box-shadow:
+    inset 0 1px 0 var(--malv-chat-composer-inner-highlight),
+    inset 0 0 48px var(--malv-chat-composer-inner-glow),
+    inset 0 0 80px rgb(var(--malv-f-live-rgb) / 0.07);
+}
+
+html:not(.dark) .malv-chat-composer-shell.malv-input-dock {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 48%),
+    var(--malv-chat-composer-bg);
+}
+
+html:not(.dark) .malv-chat-composer-shell.malv-input-dock::before {
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.35) 0%, transparent 45%, transparent 100%);
+}
+
+@media (hover: hover) {
+  .malv-chat-composer-shell.malv-input-dock:hover:not(:focus-within) {
+    border-color: var(--malv-chat-composer-border-hover);
+    box-shadow: var(--malv-chat-composer-shadow-hover);
+    filter: brightness(1.03);
+  }
+}
+
+.malv-chat-composer-shell.malv-input-dock:focus-within {
+  border-color: var(--malv-chat-composer-border-focus);
   box-shadow:
     var(--malv-chat-composer-shadow-focus),
-    0 0 0 1px var(--malv-chat-surface-highlight) inset;
+    0 0 0 1px var(--malv-chat-composer-accent-ring),
+    0 0 36px var(--malv-chat-composer-accent-glow),
+    0 0 64px var(--malv-chat-composer-accent-glow);
+  filter: brightness(1.05);
 }
 
-.malv-chat-composer-shell {
-  transform: translateY(0);
+.malv-chat-composer-shell .malv-composer-send {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease,
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    opacity 200ms ease;
 }
 
-.malv-chat-composer-shell:focus-within {
-  transform: translateY(-1px);
+.malv-chat-composer-shell .malv-composer-send:not(:disabled):hover {
+  transform: scale(1.05);
+}
+
+.malv-chat-composer-shell .malv-composer-send.malv-composer-send--stop:not(:disabled):hover {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.dark .malv-chat-composer-shell .malv-composer-send.malv-composer-send--stop:not(:disabled):hover {
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.42);
+}
+
+.malv-chat-composer-shell
+  .malv-composer-send:not(.malv-composer-send--ready):not(.malv-composer-send--stop):not(:disabled):hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.dark
+  .malv-chat-composer-shell
+  .malv-composer-send:not(.malv-composer-send--ready):not(.malv-composer-send--stop):not(:disabled):hover {
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.32);
+}
+
+.malv-chat-composer-shell .malv-composer-send:not(:disabled):active {
+  transform: scale(0.98);
+  transition-duration: 120ms;
+}
+
+.malv-chat-composer-shell .malv-composer-send.malv-composer-send--ready:not(:disabled) {
+  border-color: rgb(var(--malv-f-ring-live-rgb) / 0.52);
+  background: linear-gradient(180deg, rgb(var(--malv-f-live-rgb) / 0.26) 0%, rgb(var(--malv-f-live-rgb) / 0.14) 100%);
+  color: rgb(var(--malv-text-rgb));
+  box-shadow:
+    inset 0 1px 0 rgb(var(--malv-f-live-rgb) / 0.22),
+    0 2px 12px rgb(var(--malv-f-live-rgb) / 0.18);
+}
+
+.dark .malv-chat-composer-shell .malv-composer-send.malv-composer-send--ready:not(:disabled) {
+  color: #ffffff;
+}
+
+.malv-chat-composer-shell .malv-composer-send.malv-composer-send--ready:not(:disabled):hover {
+  border-color: rgb(var(--malv-f-ring-live-rgb) / 0.58);
+  background: linear-gradient(180deg, rgb(var(--malv-f-live-rgb) / 0.32) 0%, rgb(var(--malv-f-live-rgb) / 0.18) 100%);
+  box-shadow:
+    0 0 28px rgb(var(--malv-f-live-rgb) / 0.32),
+    inset 0 1px 0 rgb(var(--malv-f-live-rgb) / 0.26);
+}
+
+.malv-chat-composer-shell textarea.malv-composer-input {
+  color: rgb(var(--malv-text-rgb));
+  caret-color: rgb(var(--malv-f-live-rgb));
+}
+
+.dark .malv-chat-composer-shell textarea.malv-composer-input {
+  color: #ffffff;
+}
+
+.malv-chat-composer-shell textarea.malv-composer-input::placeholder {
+  color: rgb(var(--malv-muted-rgb) / 0.72);
+}
+
+.dark .malv-chat-composer-shell textarea.malv-composer-input::placeholder {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+html:not(.dark) .malv-chat-composer-shell textarea.malv-composer-input::placeholder {
+  color: rgba(0, 0, 0, 0.46);
 }
 
 @keyframes malv-ambient-breath {
@@ -542,13 +1160,140 @@ body {
   .malv-chat-shell,
   .malv-card,
   .malv-interactive,
-  .malv-input-dock,
+  .malv-chat-composer-shell.malv-input-dock,
+  .malv-chat-composer-shell .malv-composer-send,
   .malv-chat-header-action,
   .malv-chat-header-action-icon {
     transition: none;
   }
 
+  .malv-chat-composer-shell.malv-input-dock:hover:not(:focus-within),
+  .malv-chat-composer-shell.malv-input-dock:focus-within {
+    filter: none;
+  }
+
+  .explore-img-prompt-shell {
+    transition: none;
+  }
+
+  .malv-chat-composer-shell.malv-input-dock::after {
+    transition: none;
+  }
+
+  .malv-chat-composer-shell .malv-composer-send:not(:disabled):hover {
+    transform: none;
+  }
+
   .malv-chat-header-action {
     animation: none;
   }
+}
+
+/*
+   ---break---
+   shadcn / theme tokens + global base (plain CSS — no @layer, compatible with Tailwind v4 + @tailwindcss/vite).
+   */
+
+.theme {
+  --font-heading: var(--font-sans);
+  --font-sans: "Geist Variable", sans-serif;
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  /* Align shadcn semantic tokens with MALV rgb stack + gold primary + live interaction ring */
+  --background: rgb(var(--malv-canvas-rgb));
+  --foreground: rgb(var(--malv-text-rgb));
+  --card: rgb(var(--malv-card-rgb));
+  --card-foreground: rgb(var(--malv-text-rgb));
+  --popover: rgb(var(--malv-surface-overlay-rgb));
+  --popover-foreground: rgb(var(--malv-text-rgb));
+  /* Muted antique gold — premium CTA, not bright yellow */
+  --primary: oklch(0.6 0.048 78);
+  --primary-foreground: oklch(0.14 0.02 78);
+  --secondary: rgb(var(--malv-surface-raised-rgb));
+  --secondary-foreground: rgb(var(--malv-text-rgb));
+  --muted: rgb(var(--malv-surface-base-rgb));
+  --muted-foreground: rgb(var(--malv-muted-rgb) / 0.92);
+  /* Subtle live wash for hover/accent surfaces */
+  --accent: rgb(var(--malv-f-live-rgb) / 0.12);
+  --accent-foreground: rgb(var(--malv-text-rgb));
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: rgb(255 255 255 / 0.09);
+  --input: rgb(255 255 255 / 0.11);
+  --ring: rgb(var(--malv-f-ring-live-rgb) / 0.52);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: rgb(var(--malv-surface-base-rgb));
+  --sidebar-foreground: rgb(var(--malv-text-rgb));
+  --sidebar-primary: oklch(0.6 0.048 78);
+  --sidebar-primary-foreground: oklch(0.14 0.02 78);
+  --sidebar-accent: rgb(var(--malv-f-live-rgb) / 0.1);
+  --sidebar-accent-foreground: rgb(var(--malv-text-rgb));
+  --sidebar-border: rgb(255 255 255 / 0.09);
+  --sidebar-ring: rgb(var(--malv-f-ring-live-rgb) / 0.48);
+}
+
+* {
+  border-color: var(--border);
+  outline-color: rgb(0 0 0 / 0.12);
+}
+
+.dark * {
+  outline-color: rgb(var(--malv-f-ring-live-rgb) / 0.22);
+}
+
+.dark :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea)::placeholder {
+  color: var(--malv-color-text-placeholder);
+}
+
+html:not(.dark)
+  :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea)::placeholder {
+  color: var(--malv-color-text-placeholder);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+html {
+  font-family: system-ui, sans-serif;
 }

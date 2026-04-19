@@ -14,7 +14,7 @@ import inspect
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 
@@ -91,6 +91,26 @@ def _extract_chat_text(data: Any) -> str:
     return ""
 
 
+def _normalize_upstream_finish_reason(reason: Any) -> str:
+    if not isinstance(reason, str):
+        return "unknown"
+    v = reason.strip().lower()
+    if not v:
+        return "unknown"
+    # Preserve known upstream semantics so API can derive completion/continuation policy.
+    if v in ("stop", "length", "content_filter"):
+        return v
+    return v
+
+
+def _normalized_system_content(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    return str(content).strip()
+
+
 def _list_model_ids(data: Any) -> List[str]:
     out: List[str] = []
     if not isinstance(data, dict):
@@ -114,26 +134,43 @@ def _model_matches_configured(configured: str, listed: List[str]) -> bool:
 class OpenAiCompatibleInferenceProvider:
     """OpenAI-compatible /v1/chat/completions (e.g. vLLM on RunPod)."""
 
-    name = "openai_compatible"
-
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, slot: Literal["primary", "lightweight"] = "primary") -> None:
         self._settings = settings
-        self._api_root = normalize_openai_compat_api_root((settings.openai_compat_base_url or "").strip()) or ""
+        self._slot = slot
+        if slot == "lightweight":
+            self.name = "lightweight_local"
+            raw_root = (settings.lightweight_openai_compat_base_url or "").strip()
+            self._api_root = normalize_openai_compat_api_root(raw_root) or ""
+            key = (settings.lightweight_openai_compat_api_key or settings.openai_compat_api_key or "").strip()
+            self._api_key = key or None
+            self._default_model = (settings.lightweight_inference_model or "").strip()
+            to_ms = settings.lightweight_inference_timeout_ms or settings.inference_timeout_ms
+            self._timeout_s = max(1.0, to_ms / 1000.0)
+            self._meta = ProviderMetadata(
+                backend_type="lightweight_local",
+                model_name=self._default_model or None,
+                supports_stream=True,
+                cpu_only=True,
+                priority=20,
+            )
+        else:
+            self.name = "openai_compatible"
+            self._api_root = normalize_openai_compat_api_root((settings.openai_compat_base_url or "").strip()) or ""
+            key = (settings.openai_compat_api_key or "").strip()
+            self._api_key = key or None
+            self._default_model = (settings.inference_model or "").strip()
+            self._timeout_s = max(1.0, settings.inference_timeout_ms / 1000.0)
+            self._meta = ProviderMetadata(
+                backend_type="openai_compatible",
+                model_name=self._default_model or None,
+                supports_stream=True,
+            )
         self._models_url = openai_compat_models_url(self._api_root) if self._api_root else ""
         self._chat_url = openai_compat_chat_completions_url(self._api_root) if self._api_root else ""
-        key = (settings.openai_compat_api_key or "").strip()
-        self._api_key = key or None
-        self._default_model = (settings.inference_model or "").strip()
-        self._timeout_s = max(1.0, settings.inference_timeout_ms / 1000.0)
-        self._meta = ProviderMetadata(
-            backend_type="openai_compatible",
-            model_name=self._default_model or None,
-            supports_stream=True,
-        )
         if self._api_root:
             _log.info(
-                "[MALV INFERENCE] structured backend=openai_compatible phase=init api_root=%s "
-                "models_url=%s chat_url=%s",
+                "[MALV INFERENCE] structured backend=%s phase=init api_root=%s models_url=%s chat_url=%s",
+                self.name,
                 self._api_root,
                 _safe_url_for_log(self._models_url),
                 _safe_url_for_log(self._chat_url),
@@ -154,15 +191,20 @@ class OpenAiCompatibleInferenceProvider:
             or self._default_model
         )
         if not m or not str(m).strip():
+            hint = (
+                "Set MALV_LIGHTWEIGHT_INFERENCE_MODEL for the lightweight slot."
+                if self._slot == "lightweight"
+                else "Set MALV_INFERENCE_MODEL to the served model id (must match /v1/models on the remote)"
+            )
             raise ValueError(
-                "OpenAI-compatible model not configured. Set MALV_INFERENCE_MODEL to the served model id "
-                "(must match /v1/models on the remote) or pass inferenceModel in context."
+                "OpenAI-compatible model not configured. "
+                f"{hint} or pass inferenceModel / malvInferenceModel in context."
             )
         return str(m).strip()
 
     def _messages_for(self, req: InferenceRequest) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
         if req.messages and isinstance(req.messages, list):
-            out: List[Dict[str, Any]] = []
             for m in req.messages:
                 if isinstance(m, dict) and m.get("role") is not None:
                     out.append(
@@ -172,13 +214,24 @@ class OpenAiCompatibleInferenceProvider:
                             "content": m.get("content", ""),
                         }
                     )
-            if out:
-                return out
+
+        system_prompt = _normalized_system_content(req.system_prompt)
+        if system_prompt:
+            has_identical_leading_system = (
+                len(out) > 0
+                and str(out[0].get("role", "")).strip().lower() == "system"
+                and _normalized_system_content(out[0].get("content")) == system_prompt
+            )
+            if not has_identical_leading_system:
+                out = [{"role": "system", "content": system_prompt}, *out]
+
+        if out:
+            return out
 
         prompt = build_prompt_for_provider(req)
         messages: List[Dict[str, Any]] = []
-        if req.system_prompt:
-            messages.append({"role": "system", "content": req.system_prompt.strip()})
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
         elif req.context.get("malvPromptAlreadyExpanded"):
             messages.append({"role": "user", "content": prompt})
@@ -223,13 +276,18 @@ class OpenAiCompatibleInferenceProvider:
             return out
 
         if not self._api_root:
+            env_hint = (
+                "MALV_LIGHTWEIGHT_OPENAI_COMPAT_BASE_URL is not set"
+                if self._slot == "lightweight"
+                else "MALV_OPENAI_COMPAT_BASE_URL is not set"
+            )
             return _payload(
                 reachable=False,
                 ok=False,
                 latency=0,
                 models=[],
                 model_listed=False,
-                error="MALV_OPENAI_COMPAT_BASE_URL is not set",
+                error=env_hint,
             )
 
         try:
@@ -439,8 +497,21 @@ class OpenAiCompatibleInferenceProvider:
             data = r.json()
             text = _extract_chat_text(data)
             latency = int((time.perf_counter() - t0) * 1000)
+            c0 = data.get("choices", [{}])[0] if isinstance(data.get("choices"), list) and data.get("choices") else {}
+            upstream_finish_reason = c0.get("finish_reason") if isinstance(c0, dict) else None
+            mapped_finish_reason = _normalize_upstream_finish_reason(upstream_finish_reason)
+            _log.debug(
+                "[MALV INFERENCE] finish_reason_map %s",
+                {
+                    "backend": self.name,
+                    "stream": stream,
+                    "upstream_finish_reason": upstream_finish_reason,
+                    "mapped_finish_reason": mapped_finish_reason,
+                    "correlation_id": cid,
+                    "run_id": req.run_id,
+                },
+            )
             if not (text or "").strip():
-                c0 = data.get("choices", [{}])[0] if isinstance(data.get("choices"), list) and data.get("choices") else {}
                 msg = c0.get("message") if isinstance(c0, dict) else {}
                 content = msg.get("content") if isinstance(msg, dict) else None
                 finish_reason = c0.get("finish_reason") if isinstance(c0, dict) else None
@@ -493,7 +564,7 @@ class OpenAiCompatibleInferenceProvider:
             )
             return InferenceResponse(
                 text=text,
-                finish_reason="stop",
+                finish_reason=mapped_finish_reason,
                 model=model,
                 backend=self.name,
                 latency_ms=latency,
@@ -609,6 +680,7 @@ class OpenAiCompatibleInferenceProvider:
         full: list[str] = []
         err: Optional[str] = None
         cancelled = False
+        upstream_finish_reason: Any = None
         cid = effective_correlation_id(req)
 
         _log.info(
@@ -661,6 +733,8 @@ class OpenAiCompatibleInferenceProvider:
                             continue
                         ch = obj.get("choices") or []
                         if ch and isinstance(ch[0], dict):
+                            if ch[0].get("finish_reason") is not None:
+                                upstream_finish_reason = ch[0].get("finish_reason")
                             delta = ch[0].get("delta") or {}
                             piece = delta.get("content") or ""
                             if piece:
@@ -713,9 +787,21 @@ class OpenAiCompatibleInferenceProvider:
         latency = int((time.perf_counter() - t0) * 1000)
         text = "".join(full).strip()
         err_out = sanitize_error_summary(err, max_len=240) if err else None
+        mapped_finish_reason = _normalize_upstream_finish_reason(upstream_finish_reason)
+        _log.debug(
+            "[MALV INFERENCE] finish_reason_map %s",
+            {
+                "backend": self.name,
+                "stream": True,
+                "upstream_finish_reason": upstream_finish_reason,
+                "mapped_finish_reason": mapped_finish_reason,
+                "correlation_id": cid,
+                "run_id": req.run_id,
+            },
+        )
         resp = InferenceResponse(
             text=text,
-            finish_reason="cancelled" if cancelled else ("error" if err_out else "stop"),
+            finish_reason="cancelled" if cancelled else ("error" if err_out else mapped_finish_reason),
             model=model,
             backend=self.name,
             latency_ms=latency,

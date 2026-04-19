@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 InferMode = Literal["light", "cpu", "gpu", "beast"]
-FinishReason = Literal["stop", "length", "cancelled", "error", "unknown"]
+FinishReason = Literal["stop", "length", "content_filter", "cancelled", "error", "unknown"]
 
 
 @dataclass

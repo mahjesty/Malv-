@@ -22,6 +22,7 @@ import type {
 import { VOICE_ONBOARDING_TRANSCRIPT_QUESTION } from "../voice/boxed/boxed-voice-copy";
 import { MalvFeatureFlagsService } from "../common/malv-feature-flags.service";
 import { BeastWorkerClient } from "../beast/client/beast-worker.client";
+import { InferenceRoutingService } from "../inference/inference-routing.service";
 import { WorkspaceActivityService } from "../workspace/workspace-activity.service";
 import { AuthorizationService } from "../common/authorization/authorization.service";
 import { ObservabilityService } from "../common/observability.service";
@@ -43,6 +44,7 @@ export class CallsService {
     @InjectRepository(MessageEntity) private readonly messages: Repository<MessageEntity>,
     @InjectRepository(WorkspaceTaskEntity) private readonly tasks: Repository<WorkspaceTaskEntity>,
     private readonly beastWorker: BeastWorkerClient,
+    private readonly inferenceRouting: InferenceRoutingService,
     private readonly flags: MalvFeatureFlagsService,
     private readonly activity: WorkspaceActivityService,
     private readonly authz: AuthorizationService,
@@ -286,13 +288,20 @@ export class CallsService {
     let recap: CallRecapPayload | null = null;
     if (transcript.length > 0) {
       try {
+        const recapPrompt = this.buildAutoRecapPrompt({ session, transcript });
+        const route = this.inferenceRouting.decideForCallRecap({
+          surface: "call_recap",
+          transcriptJsonChars: recapPrompt.length
+        });
         const worker = await this.beastWorker.infer({
           mode: "beast",
-          prompt: this.buildAutoRecapPrompt({ session, transcript }),
+          prompt: recapPrompt,
           context: {
             malvPromptAlreadyExpanded: true,
             malvOperatorMode: "analyze",
-            callRecap: true
+            callRecap: true,
+            ...route.workerContextPatch,
+            malvRouting: route.telemetry
           }
         });
         recap = this.parseAutoRecapJson(worker.reply ?? "");

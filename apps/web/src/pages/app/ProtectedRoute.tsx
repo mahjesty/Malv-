@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../lib/auth/AuthContext";
 import { LogoMark } from "@malv/ui";
 import { Button } from "@malv/ui";
@@ -16,7 +17,7 @@ export function ProtectedRoute(props: { children: ReactNode }) {
             <LogoMark size={36} variant="animated" className="text-malv-text/92" />
             <div>
               <div className="font-display text-lg font-semibold">MALV</div>
-              <div className="text-malv-text/60 text-sm">Establishing secure session…</div>
+              <div className="text-malv-text/60 text-sm">Checking…</div>
             </div>
           </div>
           <div className="mt-6 space-y-2">
@@ -36,9 +37,9 @@ export function ProtectedRoute(props: { children: ReactNode }) {
             <div className="flex items-start gap-4">
               <LogoMark size={40} />
               <div>
-                <h1 className="font-display text-xl font-semibold tracking-tight">Private operator access</h1>
+                <h1 className="font-display text-xl font-semibold tracking-tight">Sign in to continue</h1>
                 <p className="text-malv-text/60 text-sm mt-2 leading-relaxed">
-                  Sign in to open your MALV control surface. Sessions stay policy-bound and auditable.
+                  Your session expired for security. Sign in again to continue—or create an account if you&apos;re new.
                 </p>
               </div>
             </div>
@@ -51,8 +52,14 @@ export function ProtectedRoute(props: { children: ReactNode }) {
               </Button>
             </div>
           </Card>
-          <p className="mt-6 text-center text-[11px] font-mono text-malv-text/40 tracking-wide">
-            Client gate only — server-side enforcement ships with the API.
+          <p className="mt-6 text-center text-xs text-malv-text/45">
+            Having trouble signing in?{" "}
+            <Link
+              to="/support"
+              className="text-malv-text/70 underline decoration-malv-text/25 underline-offset-2 transition-colors hover:text-malv-text hover:decoration-malv-text/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 focus-visible:rounded-sm"
+            >
+              Contact support
+            </Link>
           </p>
         </div>
       </div>

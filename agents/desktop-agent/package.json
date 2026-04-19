@@ -1,0 +1,14 @@
+{
+  "name": "@malv/desktop-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MALV desktop execution agent (Node.js) — safe v1 action set only.",
+  "scripts": {
+    "start": "node src/agent.mjs"
+  },
+  "dependencies": {
+    "open": "^10.1.0",
+    "socket.io-client": "^4.8.1"
+  }
+}

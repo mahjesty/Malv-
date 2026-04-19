@@ -1,9 +1,21 @@
 /**
- * Post-process model output: operator tone, no third-party model branding leakage,
- * generic filler / repetition dampening.
+ * Post-process model output: partner tone, no third-party model branding leakage,
+ * generic filler / repetition dampening, response-style cleanup.
  */
 
 import { MALV_OPERATOR_PIVOT_FALLBACK } from "./malv-personality";
+import { applyMalvResponseStyle } from "./malv-response-style.util";
+import { MALV_IDENTITY_POLICY } from "./malv-identity-policy";
+import { enforceMalvFinalReplyIdentityPolicy, type MalvIdentityEnforcementMode } from "./malv-final-reply-identity-validator";
+import type { MalvUniversalCapabilityRoute } from "./malv-universal-capability-router.util";
+import {
+  stripMalvInstructionOnlyCapabilityDeferrals,
+  stripMalvOfflineCapabilityDisclaimers
+} from "./malv-anti-offline-capability-disclaimer.util";
+import {
+  stripMalvImagePresenceMetaCommentary,
+  stripMalvTutorialGuidancePhrasing
+} from "./malv-reply-behavior-postprocess.util";
 
 /** When leakage strips everything — avoid generic assistant recovery loops. */
 export const MALV_IDENTITY_SAFE_FALLBACK = MALV_OPERATOR_PIVOT_FALLBACK;
@@ -24,10 +36,13 @@ const GENERIC_CLOSER_PATTERNS: RegExp[] = [
 const GENERIC_WHOLE_REPLY =
   /^(?:\s*(?:how\s+can\s+i\s+(?:help|assist)\s+you(?:\s+today)?|what\s+do\s+you\s+need\??|hello[!.,\s]*|hi[!.,\s]*)[?.!,\s]*)+$/i;
 
-/** Hollow enthusiasm at the very start — strip when followed by substance. */
+/**
+ * Hollow affirmations only when a substantive clause follows (capital, digit, code fence, etc.).
+ * Preserves meaningful agreement ("Sure, that's correct.").
+ */
 const LEADING_HOLLOW_OPENERS: RegExp[] = [
-  /^(certainly|sure|of course|absolutely)[!.,:—\s]+/i,
-  /^(i['']d\s+be\s+(happy|delighted|glad)\s+to\s+help[!.,\s]+)/i
+  /^(?:[Cc]ertainly|[Ss]ure|[Oo]f\s+course|[Aa]bsolutely)(?:[!.,]+|;|:|\s)+(?=[A-Z0-9#`"'\\[])/,
+  /^(i['']d\s+be\s+(?:happy|delighted|glad)\s+to\s+(?:help|assist)(?:\s+you)?)(?:\s*[,!.]*)+\s+/i
 ];
 
 function stripLeadingHollowOpeners(text: string): string {
@@ -129,12 +144,27 @@ export function applyRepetitionGuard(
 
 export type ShapeMalvReplyOptions = {
   priorAssistantTexts?: string[];
+  /** When set, strip "no real-time / can't browse" disclaimers that conflict with routed capabilities. */
+  universalCapabilityRoute?: MalvUniversalCapabilityRoute | null;
+  /**
+   * When true, skip removal of hollow opener phrases ("Certainly! …", "Sure, …").
+   * Set by live-stream paths: the user already saw these tokens during streaming, so
+   * removing them from the final body would silently rewrite already-visible text.
+   */
+  skipLeadingHollowOpenerStrip?: boolean;
+  /**
+   * When true, pass `demoteReplaceToStrip` to the terminal identity enforcement call so that
+   * a full-body policy-line swap is never performed. Used on streamed-reply finalization paths
+   * where replacing the entire visible body would break the stream = final UX contract.
+   */
+  demoteIdentityReplace?: boolean;
 };
 
 export type ShapeMalvReplyResult = {
   text: string;
   repetitionGuardTriggered: boolean;
   hadModelIdentityLeak: boolean;
+  identityEnforcementMode: MalvIdentityEnforcementMode;
 };
 
 /** Legacy / extra leakage (training meta, browsing claims) — strip without full rewrite. */
@@ -145,22 +175,41 @@ const AUX_STRIP_PATTERNS: RegExp[] = [
   /\btrained by (OpenAI|Anthropic|Alibaba|Meta|Google)[^.!?\n]*/gi
 ];
 
+function escapeRegexLiteral(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const FORBIDDEN_CLAIM_PATTERNS: RegExp[] = MALV_IDENTITY_POLICY.explicitForbiddenIdentityClaims.map(
+  (claim) => new RegExp(`\\b${escapeRegexLiteral(claim)}\\b[^.!?\\n]*[.!?]?`, "gi")
+);
+
 /**
  * Vendor / base-model self-identification — one phrase or sentence at a time.
  */
 const IDENTITY_LEAK_PATTERNS: RegExp[] = [
+  /\bI\s*[,:-]\s*Qwen\b[^.!?\n]*[.!?]?/gi,
   /\bI['']m\s+Qwen\b[^.!?\n]*[.!?]?/gi,
   /\bI\s+am\s+Qwen\b[^.!?\n]*[.!?]?/gi,
+  /\bThis\s+is\s+Qwen\b[^.!?\n]*[.!?]?/gi,
   /\bI['']m\s+(?:a\s+)?(?:large\s+language\s+model\s+)?(?:Qwen|GPT|Claude|Gemini|Llama|Mistral|Mixtral|DeepSeek)\b[^.!?\n]*[.!?]?/gi,
   /\bI\s+am\s+(?:a\s+)?(?:large\s+language\s+model\s+)?(?:Qwen|GPT|Claude|Gemini|Llama|Mistral|Mixtral|DeepSeek)\b[^.!?\n]*[.!?]?/gi,
+  /\bThis\s+is\s+(?:the\s+)?(?:Qwen|GPT|Claude|Gemini|Llama|Mistral|Mixtral|DeepSeek)\b[^.!?\n]*[.!?]?/gi,
   /\bI['']m\s+an\s+AI\s+assistant\s+created\s+by\b[^.!?\n]*[.!?]?/gi,
   /\bI\s+am\s+an\s+AI\s+assistant\s+created\s+by\b[^.!?\n]*[.!?]?/gi,
   /\blarge\s+language\s+model\s+created\s+by\b[^.!?\n]*[.!?]?/gi,
+  /\bI(?:['']m| am)\b[^.!?\n]{0,120}\bcreated\s+by\s+Alibaba(?:\s+Cloud)?\b[^.!?\n]*[.!?]?/gi,
+  /\b(?:I|we)\s+were\s+created\s+by\s+Alibaba(?:\s+Cloud)?\b[^.!?\n]*[.!?]?/gi,
   /\bcreated\s+by\s+Alibaba\s+Cloud\b[^.!?\n]*[.!?]?/gi,
+  /\bcreated\s+by\s+Alibaba\b[^.!?\n]*[.!?]?/gi,
   /\bI['']m[^.!?\n]{0,160}Alibaba\s+Cloud\b[^.!?\n]*[.!?]?/gi,
   /\bI\s+am[^.!?\n]{0,160}Alibaba\s+Cloud\b[^.!?\n]*[.!?]?/gi,
   /\bI['']m\s+(?:a\s+)?(?:assistant\s+)?(?:developed|created|trained)\s+by\b[^.!?\n]*[.!?]?/gi,
-  /\bI\s+am\s+(?:a\s+)?(?:assistant\s+)?(?:developed|created|trained)\s+by\b[^.!?\n]*[.!?]?/gi
+  /\bI\s+am\s+(?:a\s+)?(?:assistant\s+)?(?:developed|created|trained)\s+by\b[^.!?\n]*[.!?]?/gi,
+  /\bMALV\s+was\s+(?:created|developed|built)\s+by\s+Alibaba(?:\s+Cloud)?\b[^.!?\n]*[.!?]?/gi,
+  /\bMALV\s+is\s+(?:another\s+)?model\s+(?:created|developed|built)\s+by\s+Alibaba(?:\s+Cloud)?\b[^.!?\n]*[.!?]?/gi,
+  /\bI\s+(?:was|am)\s+(?:built|created|developed)\s+by\s+Alibaba(?:\s+Cloud)?\b[^.!?\n]*[.!?]?/gi,
+  /\bI\s+am\s+from\s+Alibaba(?:\s+Cloud)?\b[^.!?\n]*[.!?]?/gi,
+  ...FORBIDDEN_CLAIM_PATTERNS
 ];
 
 function stripWithPatterns(text: string, patterns: RegExp[]): string {
@@ -239,24 +288,41 @@ export function shapeMalvReply(raw: string, options?: ShapeMalvReplyOptions): Sh
     .filter((s) => s.length > 0)
     .slice(-4);
 
-  const leakProbe = stripIdentityPatterns(raw.trim());
+  const rawTrimmed = raw.trim();
+  const leakProbe = stripIdentityPatterns(rawTrimmed);
 
   let text = stripModelIdentityLeakage(raw);
+  text = applyMalvResponseStyle(text);
+  text = stripMalvTutorialGuidancePhrasing(text);
+  text = stripMalvImagePresenceMetaCommentary(text);
+  text = stripMalvOfflineCapabilityDisclaimers(text, options?.universalCapabilityRoute ?? null);
+  text = stripMalvInstructionOnlyCapabilityDeferrals(text, options?.universalCapabilityRoute ?? null);
   text = replaceContentFreeGenericShell(text);
 
   const rep = applyRepetitionGuard(text, prior);
   text = rep.text;
   text = stripTrailingGenericClosers(text);
-  text = stripLeadingHollowOpeners(text);
+  if (!options?.skipLeadingHollowOpenerStrip) {
+    text = stripLeadingHollowOpeners(text);
+  }
   text = stripTrailingGenericClosers(text);
 
   if (!text.trim()) {
     text = MALV_IDENTITY_SAFE_FALLBACK;
   }
 
+  const identityValidation = enforceMalvFinalReplyIdentityPolicy(text, MALV_IDENTITY_POLICY, {
+    demoteReplaceToStrip: options?.demoteIdentityReplace ?? false
+  });
+  text = identityValidation.text.trim();
+  if (!text) {
+    text = MALV_IDENTITY_SAFE_FALLBACK;
+  }
+
   return {
     text: text.trim(),
     repetitionGuardTriggered: rep.triggered,
-    hadModelIdentityLeak: leakProbe.hadLeak
+    hadModelIdentityLeak: leakProbe.hadLeak || identityValidation.hadViolation,
+    identityEnforcementMode: identityValidation.mode
   };
 }

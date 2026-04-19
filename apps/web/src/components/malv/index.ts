@@ -1,3 +1,11 @@
+/** UI foundation primitives */
+export { MalvButton, malvButtonVariants, type MalvButtonProps } from "./MalvButton";
+export { MalvCard, malvCardVariants, type MalvCardProps } from "./MalvCard";
+export { MalvInput, malvInputVariants, type MalvInputProps } from "./MalvInput";
+export { MalvPanel, malvPanelVariants, type MalvPanelProps } from "./MalvPanel";
+export { MalvSectionHeader, type MalvSectionHeaderProps } from "./MalvSectionHeader";
+
+/** Existing MALV shell / call surface (barrel) */
 export * from "./presence";
 export { MalvPresenceSurface } from "./call/MalvPresenceSurface";
 export { MalvCallStatusBar } from "./call/MalvCallStatusBar";

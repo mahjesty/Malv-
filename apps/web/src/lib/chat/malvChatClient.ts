@@ -53,6 +53,8 @@ function buildMockReply(userText: string): string {
   ].join("\n");
 }
 
+const DEFAULT_THINKING_STEPS = ["Reading your request", "Choosing the clearest path", "Writing the response"] as const;
+
 /**
  * MALV chat client: normalizes socket chunks, HTTP replies, and mock simulation into MalvOrchestrationEvent.
  * Swap or extend transports without changing UI hooks.
@@ -224,6 +226,12 @@ export class MalvChatClient {
     this.emit({ type: "conversation_bound", conversationId: cid });
 
     const phases = ["thinking", "analyzing_context", "planning_next_step", "building_response"] as const;
+    this.emit({
+      type: "thinking_state",
+      conversationId: cid,
+      messageId: payload.assistantMessageId,
+      steps: [...DEFAULT_THINKING_STEPS]
+    });
     for (const phase of phases) {
       if (this.ignoreIncoming) return;
       this.emit({
@@ -239,7 +247,6 @@ export class MalvChatClient {
     const chunks = chunkTextForStream(full, 80);
     for (let i = 0; i < chunks.length; i++) {
       if (this.ignoreIncoming) return;
-      await sleep(14 + Math.random() * 22, payload.signal);
       this.emit({
         type: "assistant_delta",
         conversationId: cid,
@@ -263,7 +270,6 @@ export class MalvChatClient {
 
   private async runSocketPipeline(socket: MalvSocket, payload: MalvSendPayload) {
     const assistantId = payload.assistantMessageId;
-    let completedViaChunk = false;
 
     this.emit({
       type: "thinking",
@@ -286,6 +292,15 @@ export class MalvChatClient {
         });
         return;
       }
+      if (t === "thinking_state") {
+        this.emit({
+          type: "thinking_state",
+          conversationId: cid,
+          messageId: typeof raw.messageId === "string" ? raw.messageId : assistantId,
+          steps: Array.isArray(raw.steps) ? raw.steps.filter((s): s is string => typeof s === "string") : []
+        });
+        return;
+      }
       if (t === "memory_context") {
         this.emit({
           type: "memory_context",
@@ -305,14 +320,30 @@ export class MalvChatClient {
         });
         return;
       }
-      if (t === "assistant_done" && raw.terminal === "interrupted") {
+      if (t === "assistant_done") {
+        const terminal =
+          raw.terminal === "interrupted" ? ("interrupted" as const) : ("completed" as const);
+        const malvTurnOutcome =
+          raw.malvTurnOutcome === "partial_done"
+            ? ("partial_done" as const)
+            : raw.malvTurnOutcome === "failed_before_output"
+              ? ("failed_before_output" as const)
+              : ("complete" as const);
+        const assistantMetaRaw = raw.assistantMeta;
+        const assistantMeta =
+          assistantMetaRaw && typeof assistantMetaRaw === "object" && !Array.isArray(assistantMetaRaw)
+            ? (assistantMetaRaw as Record<string, unknown>)
+            : undefined;
         this.emit({
           type: "assistant_done",
           conversationId: cid,
           messageId: assistantId,
           finalContent: typeof raw.finalContent === "string" ? raw.finalContent : undefined,
-          terminal: "interrupted"
+          terminal,
+          malvTurnOutcome,
+          ...(assistantMeta ? { assistantMeta } : {})
         });
+        malvChatPipelineLog("assistant completed", { via: "malv_orchestration", messageId: assistantId, terminal });
         this.teardownSocketScope();
       }
     };
@@ -331,25 +362,16 @@ export class MalvChatClient {
         conversationId: p.conversationId,
         messageId: assistantId,
         delta: p.text,
-        done: p.done
+        done: false
       });
-      if (p.done) {
-        completedViaChunk = true;
-        malvChatPipelineLog("assistant completed", { via: "socket_chunk", messageId: assistantId });
-        this.emit({
-          type: "assistant_done",
-          conversationId: p.conversationId,
-          messageId: assistantId
-        });
-        this.teardownSocketScope();
-      }
     };
 
-    const onError = (p: { message: string }) => {
+    const onError = (p: { message: string; code?: string }) => {
       if (this.ignoreIncoming) return;
       this.emit({
         type: "error",
         message: p?.message ?? "Chat failed.",
+        code: typeof p?.code === "string" ? p.code : undefined,
         messageId: assistantId,
         conversationId: payload.conversationId ?? undefined
       });
@@ -414,9 +436,10 @@ export class MalvChatClient {
           assistantMessageId: payload.assistantMessageId,
           inputMode: payload.inputMode ?? "text",
           operatorPhase: payload.operatorPhase ?? null,
-          userMoodHint: payload.userMoodHint ?? null
+          userMoodHint: payload.userMoodHint ?? null,
+          exploreHandoffJson: payload.exploreHandoffJson ?? null
         },
-        (ack: { ok: boolean; conversationId?: string; error?: string } | undefined) => {
+        (ack: { ok: boolean; conversationId?: string; error?: string; replyWillStream?: boolean } | undefined) => {
           finish();
           payload.signal?.removeEventListener("abort", onAbort);
 
@@ -428,12 +451,16 @@ export class MalvChatClient {
             kind: "socket.chat:send_ack",
             ok: Boolean(ack?.ok),
             conversationId: ack?.conversationId,
-            error: ack?.error
+            error: ack?.error,
+            replyWillStream: Boolean(ack?.replyWillStream)
           });
-          if (ack?.ok && ack.conversationId) {
-            this.emit({ type: "conversation_bound", conversationId: ack.conversationId });
-            // If the server returned ok but emitted no reply chunks (e.g. legacy empty body), finish the row here.
-            if (!completedViaChunk && !this.ignoreIncoming) {
+          if (ack?.ok) {
+            if (ack.conversationId) {
+              this.emit({ type: "conversation_bound", conversationId: ack.conversationId });
+            }
+            const skipAckFallback = Boolean(ack.replyWillStream);
+            // Immediate-ack servers set replyWillStream; completion is always malv:orchestration assistant_done.
+            if (ack.conversationId && !this.ignoreIncoming && !skipAckFallback) {
               malvChatPipelineLog("assistant completed", { via: "socket_ack_fallback", messageId: assistantId });
               this.emit({
                 type: "assistant_done",
@@ -471,7 +498,13 @@ export class MalvChatClient {
     malvE2eLog("request dispatched", { kind: "http.POST", path: "/v1/chat" });
     malvChatPipelineLog("request dispatched", { kind: "http.POST", path: "/v1/chat" });
     malvChatDebug("request_emitted", { kind: "http.POST", path: "/v1/chat" });
-    const res = await apiFetch<{ reply: string; conversationId?: string; runId?: string }>({
+    const res = await apiFetch<{
+      reply?: string;
+      message?: string;
+      conversationId?: string;
+      runId?: string;
+      assistantMeta?: Record<string, unknown>;
+    }>({
       path: "/v1/chat",
       method: "POST",
       accessToken,
@@ -483,16 +516,24 @@ export class MalvChatClient {
         vaultSessionId: payload.vaultSessionId ?? null,
         inputMode: payload.inputMode ?? "text",
         operatorPhase: payload.operatorPhase ?? null,
-        userMoodHint: payload.userMoodHint ?? null
+        userMoodHint: payload.userMoodHint ?? null,
+        exploreHandoffJson: payload.exploreHandoffJson ?? null
       },
       signal: payload.signal
     });
 
+    const replyText =
+      typeof res.reply === "string" && res.reply.length > 0
+        ? res.reply
+        : typeof res.message === "string"
+          ? res.message
+          : "";
     const cid = res.conversationId ?? payload.conversationId ?? "";
     malvE2eLog("client received reply event", {
       kind: "http.POST /v1/chat response",
-      replyLen: (res.reply ?? "").length,
-      conversationId: cid || null
+      replyLen: replyText.length,
+      conversationId: cid || null,
+      shape: { hasReply: typeof res.reply === "string", hasMessage: typeof res.message === "string" }
     });
     if (res.conversationId) {
       this.emit({ type: "conversation_bound", conversationId: res.conversationId });
@@ -505,27 +546,30 @@ export class MalvChatClient {
       phase: "building_response"
     });
 
-    const chunks = chunkTextForStream(res.reply ?? "", 96);
-    for (let i = 0; i < chunks.length; i++) {
-      if (this.ignoreIncoming) break;
-      await sleep(14, payload.signal);
+    if (replyText.length > 0 && !this.ignoreIncoming) {
       this.emit({
         type: "assistant_delta",
         conversationId: cid,
         messageId: assistantId,
-        delta: chunks[i]!,
-        done: i === chunks.length - 1
+        delta: replyText,
+        done: true
       });
     }
 
     if (!this.ignoreIncoming) {
       malvChatPipelineLog("assistant completed", { via: "http", messageId: assistantId });
       malvChatDebug("done_error_reached", { kind: "assistant_done_http" });
+      const assistantMetaRaw = res.assistantMeta;
+      const assistantMeta =
+        assistantMetaRaw && typeof assistantMetaRaw === "object" && !Array.isArray(assistantMetaRaw)
+          ? assistantMetaRaw
+          : undefined;
       this.emit({
         type: "assistant_done",
         conversationId: cid,
         messageId: assistantId,
-        finalContent: res.reply
+        finalContent: replyText,
+        ...(assistantMeta ? { assistantMeta } : {})
       });
     }
   }

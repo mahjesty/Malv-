@@ -18,6 +18,7 @@ import { BackgroundJobRunnerService } from "./job-runner.service";
 import { FileUnderstandingModule } from "../file-understanding/file-understanding.module";
 import { CommonModule } from "../common/common.module";
 import { InfrastructureModule } from "../infra/infrastructure.module";
+import { WorkspaceModule } from "../workspace/workspace.module";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { InfrastructureModule } from "../infra/infrastructure.module";
     CommonModule,
     InfrastructureModule,
     KillSwitchModule,
+    WorkspaceModule,
     RealtimeModule,
     SandboxModule,
     FileUnderstandingModule,

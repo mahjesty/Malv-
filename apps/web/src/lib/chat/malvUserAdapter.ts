@@ -19,6 +19,7 @@ export function mapMalvErrorToUserMessage(err: MalvErrorLike): string {
     case "mock_failed":
       return "Practice mode had trouble completing that turn.";
     case "send_failed":
+    case "chat_pipeline_failed":
       return "Request could not be completed. Please try again.";
     case "no_token":
       return "Please sign in again to continue.";
